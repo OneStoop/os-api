@@ -413,6 +413,9 @@ def before_request():
 def teardown_request(error=None):
     pass
     
+@apiView.route('/', methods=['GET'])
+def version():
+    return make_response(jsonify({'status': 'ok'}), 200)
 
 @apiView.route('/version', methods=['GET'])
 def version():
