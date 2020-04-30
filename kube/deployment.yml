@@ -19,7 +19,9 @@ spec:
         - name: osapi
           image: onestoop/osapi:{{VERSION}}
           ports:
-            - containerPort: 80
+            - containerPort: 5000
+              protocol: TCP
+              name: http
           env:
             - name: BASE_URL
               valueFrom:
