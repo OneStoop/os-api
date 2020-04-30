@@ -10,7 +10,7 @@ ADD . /app
 RUN pip install -r requirements.txt 
 
 # Configure ports 
-EXPOSE 5000 
+EXPOSE 80 
 
 # Run apt-get, to install the SSH server, and supervisor 
 RUN apt-get update \
@@ -28,7 +28,7 @@ ADD supervisor/app.conf /etc/supervisor/conf.d/
 RUN chmod 755 /usr/bin/runapp.sh 
 
 # Default environmental variables 
-ENV SERVER_PORT 5000 
+ENV SERVER_PORT 80 
 
 # run commands in supervisor 
 CMD ["supervisord", "-n"]
