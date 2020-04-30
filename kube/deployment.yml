@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: osapi
+  namespace: default
+  labels:
+    app: osapi
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: oaiapi
+  template:
+    metadata:
+      labels:
+        app: osapi
+    spec:
+      containers:
+        - name: osapi
+          image: onestoop/osapi:VERSION
+          ports:
+            - containerPort: 80
+              name: http
+          env:
+            - name: BASE_URL
+              valueForm:
+                secretKeyRef:
+                  name: mysecret
+                  key: {{BASE_URL}}
+            - name: ARANGODB_SETTINGS
+              valueForm:
+                secretKeyRef:
+                  name: mysecret
+                  key: {{ARANGODB_SETTINGS}}
+            - name: FIREBASE_CONFIG
+              valueForm:
+                secretKeyRef:
+                  name: mysecret
+                  key: {{FIREBASE_CONFIG}}
+            - name: SPACES_KEY
+              valueForm:
+                secretKeyRef:
+                  name: mysecret
+                  key: {{SPACES_KEY}}
+            - name: SPACES_SECRET
+              valueForm:
+                secretKeyRef:
+                  name: mysecret
+                  key: {{SPACES_SECRET}}
