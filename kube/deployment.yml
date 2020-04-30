@@ -9,7 +9,7 @@ spec:
   replicas: 3
   selector:
     matchLabels:
-      app: oaiapi
+      app: osapi
   template:
     metadata:
       labels:
@@ -17,33 +17,33 @@ spec:
     spec:
       containers:
         - name: osapi
-          image: onestoop/osapi:VERSION
+          image: onestoop/osapi:{{VERSION}}
           ports:
             - containerPort: 80
               name: http
           env:
             - name: BASE_URL
-              valueForm:
+              valueFrom:
                 secretKeyRef:
                   name: mysecret
-                  key: {{BASE_URL}}
+                  key: baseurl
             - name: ARANGODB_SETTINGS
-              valueForm:
+              valueFrom:
                 secretKeyRef:
                   name: mysecret
-                  key: {{ARANGODB_SETTINGS}}
+                  key: arangodbsettings
             - name: FIREBASE_CONFIG
-              valueForm:
+              valueFrom:
                 secretKeyRef:
                   name: mysecret
-                  key: {{FIREBASE_CONFIG}}
+                  key: firebaseconfig
             - name: SPACES_KEY
-              valueForm:
+              valueFrom:
                 secretKeyRef:
                   name: mysecret
-                  key: {{SPACES_KEY}}
+                  key: spaceskey
             - name: SPACES_SECRET
-              valueForm:
+              valueFrom:
                 secretKeyRef:
                   name: mysecret
-                  key: {{SPACES_SECRET}}
+                  key: spacessecret
