@@ -5,13 +5,23 @@ metadata:
   namespace: default
   labels:
     app: osapi
+  annotations:
+    service.beta.kubernetes.io/do-loadbalancer-protocol: "http"
+    service.beta.kubernetes.io/do-loadbalancer-algorithm: "round_robin"
+    service.beta.kubernetes.io/do-loadbalancer-tls-ports: "443"
+    service.beta.kubernetes.io/do-loadbalancer-certificate-id: "5730f254-8825-4cde-bc37-92f99f9ad6ac"
+    service.beta.kubernetes.io/do-loadbalancer-redirect-http-to-https: "true"
 spec:
   type: LoadBalancer
   selector:
     app: osapi
   ports:
-    - port: 80
+    - name: http
+      protocol: TCP
+      port: 80
       targetPort: 80
-      name: http
-
+    - name: https
+      protocol: TCP
+      port: 443
+      targetPort: 80
 
