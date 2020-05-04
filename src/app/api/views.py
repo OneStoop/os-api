@@ -1154,6 +1154,69 @@ def loadRecipe(r, recipes):
     return recipes
 
 
+@apiView.route('/v1/recipesearch', methods=['GET'])
+def v1_recipesearch():
+    global Recipes
+    global db
+    global cookingDB
+
+    app.logger.debug("Reached v1_recipesearch")
+    app.logger.debug(request.headers)
+    user = validate_firebase_token_return_user(request)
+    
+    search = request.args.get("search", default=None)
+    limit = request.args.get("limit", default=10)
+    nextOffset = request.args.get("nextOffset", default=0)
+    
+    if search:
+        search = search.lower()
+    else:
+        return make_response(jsonify({'status': 'fail', 'message': 'search arg required'}), 400)
+    
+    aql = 'FOR r in Recipes FILTER '
+    
+    if user == None or user == 'expired':
+        aql += 'r.visibility != "private" FILTER '
+    
+    aql += 'LOWER(r.title) LIKE "%' + search \
+        + '%" OR LOWER(r.description) LIKE "%' + search \
+        + '%" OR  LOWER(r.ingredients[*].item) LIKE "%' + search + '%" '
+    
+    aql += 'sort r.created_date DESC LIMIT ' + str(nextOffset) + ', ' \
+        + str(limit) + ' RETURN r'
+
+    app.logger.debug(aql)
+    try:
+        r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
+        q = r.response['result']
+    except:
+        q = []
+    
+    app.logger.debug(q)
+    recipes = {"recipes": []}
+            
+    for rNum, r in enumerate(q):
+            
+        if r['visibility'] == 'private':
+            if user == None or user == 'expired':
+                pass
+            elif r['authorId'] != user['_id']:
+                pass
+            else:
+                recipes = loadRecipe(r, recipes)
+        else:
+            recipes = loadRecipe(r, recipes)
+            
+    if len(recipes['recipes']) < int(limit):
+        recipes['nextOffset'] = int(nextOffset)
+        recipes['moreResults'] = False
+    else:
+        recipes['nextOffset'] = int(nextOffset) + int(limit)
+        recipes['moreResults'] = True
+    
+    return make_response(jsonify(recipes), 200)
+
+
 @apiView.route('/v1/recipes', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def v1_recipes():
     global Recipes
@@ -1202,6 +1265,9 @@ def v1_recipes():
             if recipeId or q_user:
                 app.logger.debug("doing recipeId or q_user")
                 aql = 'FOR r in Recipes'
+    
+                if user == None or user == 'expired':
+                    aql += ' FILTER r.visibility != "private"'
                 
                 if q_user:
                     app.logger.debug(q_user)
@@ -1216,7 +1282,12 @@ def v1_recipes():
                 app.logger.debug(aql)
             elif recipeType:
                 recipeType = recipeType.lower()
-                aql = 'FOR r in Recipes FILTER r.recipeType == "' + recipeType \
+                aql = 'FOR r in Recipes'
+                
+                if user == None or user == 'expired':
+                    aql += ' FILTER r.visibility != "private"'
+                    
+                aql += ' FILTER r.recipeType == "' + recipeType \
                     + '"'
                 
                 if user == None or user == 'expired':
