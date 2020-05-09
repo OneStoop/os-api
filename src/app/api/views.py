@@ -386,6 +386,7 @@ def before_request():
     global Users
     global Requests
     global Recipes
+    global Reviews
     global conn
 
     conn = Connection(arangoURL='https://db.onestoop.com:8529',
@@ -401,6 +402,7 @@ def before_request():
     
     cookingDB = conn['cooking']
     Recipes = cookingDB['Recipes']
+    Reviews = cookingDB['Reviews']
 
     ## Bluemix proxy sets a $WSSC header to either http or https.
     ## All triffic to flask is http.
@@ -1153,70 +1155,7 @@ def loadRecipe(r, recipes):
     recipes['recipes'].append(r)
     return recipes
 
-
-@apiView.route('/v1/recipesearch', methods=['GET'])
-def v1_recipesearch():
-    global Recipes
-    global db
-    global cookingDB
-
-    app.logger.debug("Reached v1_recipesearch")
-    app.logger.debug(request.headers)
-    user = validate_firebase_token_return_user(request)
     
-    search = request.args.get("search", default=None)
-    limit = request.args.get("limit", default=10)
-    nextOffset = request.args.get("nextOffset", default=0)
-    
-    if search:
-        search = search.lower()
-    else:
-        return make_response(jsonify({'status': 'fail', 'message': 'search arg required'}), 400)
-    
-    aql = 'FOR r in Recipes FILTER '
-    
-    if user == None or user == 'expired':
-        aql += 'r.visibility != "private" FILTER '
-    
-    aql += 'LOWER(r.title) LIKE "%' + search \
-        + '%" OR LOWER(r.description) LIKE "%' + search \
-        + '%" OR  LOWER(r.ingredients[*].item) LIKE "%' + search + '%" '
-    
-    aql += 'sort r.created_date DESC LIMIT ' + str(nextOffset) + ', ' \
-        + str(limit) + ' RETURN r'
-
-    app.logger.debug(aql)
-    try:
-        r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
-        q = r.response['result']
-    except:
-        q = []
-    
-    app.logger.debug(q)
-    recipes = {"recipes": []}
-            
-    for rNum, r in enumerate(q):
-            
-        if r['visibility'] == 'private':
-            if user == None or user == 'expired':
-                pass
-            elif r['authorId'] != user['_id']:
-                pass
-            else:
-                recipes = loadRecipe(r, recipes)
-        else:
-            recipes = loadRecipe(r, recipes)
-            
-    if len(recipes['recipes']) < int(limit):
-        recipes['nextOffset'] = int(nextOffset)
-        recipes['moreResults'] = False
-    else:
-        recipes['nextOffset'] = int(nextOffset) + int(limit)
-        recipes['moreResults'] = True
-    
-    return make_response(jsonify(recipes), 200)
-
-
 @apiView.route('/v1/recipes', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def v1_recipes():
     global Recipes
@@ -1225,15 +1164,16 @@ def v1_recipes():
     global Images
 
     if request.method == "GET":
-        app.logger.debug("Reached POST in v1_recipes")
+        app.logger.debug("Reached GET in v1_recipes")
+        app.logger.debug(request.url)
         app.logger.debug(request.headers)
+
         user = validate_firebase_token_return_user(request)
 
-        authorEmail = request.args.get("authorEmail", default=None)
-        recipeId = request.args.get("recipeId", default=None)
+        authorEmail = request.args.get("author", default=None)
         recipeType = request.args.get("recipeType", default=None)
-        startTime = request.args.get("startTime", default=None)
-        endTime = request.args.get("endTime", default=None)
+        term = request.args.get("term", default=None)
+
         limit = request.args.get("limit", default=10)
         nextOffset = request.args.get("nextOffset", default=0)
         
@@ -1246,64 +1186,39 @@ def v1_recipes():
             limit = 100
         
         
-        if startTime and endTime and limit:
-            aql = 'FOR r in Recipes Filter r.created_date < ' + str(endTime) + ' AND ' \
-                'r.created_date > ' + str(startTime)
-            
-            if q_user:
-                aql += ' FILTER r.authorId == "' + q_user['_id'] + '"'
-            else:
-                aql += ' sort r.created_date ASC LIMIT ' + str(limit) + ' RETURN r'
-            
-            try:
-                r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
-                q = r.response['result']
-            except:
-                q = [] 
-        else:
-            app.logger.debug("doing fetchByExample")
-            if recipeId or q_user:
-                app.logger.debug("doing recipeId or q_user")
-                aql = 'FOR r in Recipes'
+        app.logger.debug("building aql")
+        aql = 'FOR r in Recipes FILTER '
+        
+        if user == None or user == 'expired':
+            aql += 'r.visibility != "private" FILTER'
+
+        if q_user:
+            app.logger.debug("doing recipeId or q_user")
+            aql += 'r.authorId == "' + q_user['_id'] + '"'
     
-                if user == None or user == 'expired':
-                    aql += ' FILTER r.visibility != "private"'
-                
-                if q_user:
-                    app.logger.debug(q_user)
-                    aql += ' FILTER r.authorId == "' + q_user['_id'] + '"'
-                
-                if recipeId:
-                    aql += ' FILTER r._key == "' + recipeId + '"'
-                
-                aql += ' sort r.created_date DESC LIMIT ' + str(nextOffset) \
-                    + ', ' + str(limit) + ' RETURN r'
-                app.logger.debug("this is aql")
-                app.logger.debug(aql)
-            elif recipeType:
-                recipeType = recipeType.lower()
-                aql = 'FOR r in Recipes'
-                
-                if user == None or user == 'expired':
-                    aql += ' FILTER r.visibility != "private"'
-                    
-                aql += ' FILTER r.recipeType == "' + recipeType \
-                    + '"'
-                
-                if user == None or user == 'expired':
-                    aql += ' FILTER r.visibility == "public"'
-                    
-                aql += ' sort r.created_date DESC LIMIT ' + str(nextOffset) \
-                    + ', ' + str(limit) + ' RETURN r'
-                
-                app.logger.debug("this is aql")
-                app.logger.debug(aql)
+        if term:
+            term = term.lower()
+            aql += 'LOWER(r.title) LIKE "%' + term \
+                + '%" OR LOWER(r.description) LIKE "%' + term \
+                + '%" OR LOWER(r.ingredients[*].item) LIKE "%' + term \
+                + '%" OR LOWER(r.recipeType) LIKE "%' + term \
+                + '%" OR LOWER(r.cusine) LIKE "%' + term + '%" '
+
+        elif recipeType:
+            recipeType = recipeType.lower()
+            aql += 'FILTER r.recipeType == "' + recipeType + '" '
             
-            try:
-                r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
-                q = r.response['result']
-            except:
-                q = []
+        aql += ' sort r.created_date DESC LIMIT ' + str(nextOffset) \
+            + ', ' + str(limit) + ' RETURN r'
+        
+        app.logger.debug("this is aql")
+        app.logger.debug(aql)
+        
+        try:
+            r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
+            q = r.response['result']
+        except:
+            q = []
     
         app.logger.debug("this is q")
         app.logger.debug(q)
@@ -1369,8 +1284,10 @@ def v1_recipes():
                 return make_response(jsonify({'status': 'bad JSON'}), 400)
             
             data['authorId'] = user['_id']
+            data['bookmarked'] = 0
             data['rating'] = 0
             data['ratingCount'] = 0
+            data['shares'] = 0
             data['visibility'] = data['visibility'].lower()
             data['cusine'] = data['cusine'].lower()
             data['recipeType'] = data['recipeType'].lower()
@@ -1395,6 +1312,157 @@ def v1_recipes():
         return
     else:
         return
+
+@apiView.route('/v1/recipes/<recipeId>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def v1_recipes_id(recipeId):
+    global Recipes
+    global db
+    global cookingDB
+    global Images
+
+    if request.method == "GET":
+        app.logger.debug("Reached GET in v1_recipes_id")
+        app.logger.debug(request.headers)
+        user = validate_firebase_token_return_user(request)
+        
+        if '/' in recipeId:
+            r = recipeId.split('/')
+            recipeId = r[1]
+        
+        try:
+            recipe = Recipes[recipeId]
+        except Exception:
+            return make_response(jsonify({'status': 'not found'}), 404)
+        
+        if recipe['visibility'] == 'private' and user['_id'] != recipe['authorId']:
+            return make_response(jsonify({'status': 'not found'}), 401)
+        
+        recipes = {"recipes": []}
+        recipes = loadRecipe(recipe.getStore(), recipes)
+        
+        return make_response(jsonify(recipes),200)
+    elif request.method == "POST":
+        return
+    elif request.method == "PUT":
+        return
+    elif request.method == "DELETE":
+        return
+    else:
+        return
+
+@apiView.route('/v1/recipes/<recipeId>/reviews', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def v1_recipes_id_reviews(recipeId):
+    global Recipes
+    global db
+    global cookingDB
+    global Reviews
+    
+    if request.method == "GET":
+        app.logger.debug("Reached GET in v1_recipes_id_reviews")
+        
+        limit = request.args.get("limit", default=10)
+        offset = request.args.get("offset", default=0)
+        
+        aql = 'FOR r in Reviews FILTER r.recipeId == "' + recipeId + '" ' \
+            ' sort r.created_date DESC LIMIT ' + str(offset) \
+            + ', ' + str(limit) + ' RETURN r'
+        
+        aqlCount = 'FOR doc in Reviews FILTER doc.recipeId == "' + recipeId + '" COLLECT WITH COUNT INTO length RETURN length'
+
+        app.logger.debug(aql)
+        try:
+            r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
+            c = cookingDB.AQLQuery(aqlCount, rawResults=True, batchSize=100)
+            q = r.response['result']
+            count = c.response['result'][0]
+        except:
+            q = []
+            
+        reviews = {'reviews': q}
+        reviews['total'] = count
+
+        if len(q) < int(limit):
+            reviews['nextOffset'] = int(offset)
+            reviews['moreResults'] = False
+        else:
+            reviews['nextOffset'] = int(offset) + int(limit)
+            reviews['moreResults'] = True
+        
+        app.logger.debug(reviews)
+        return make_response(jsonify(reviews), 200)
+    elif request.method == "POST":
+        app.logger.debug("Reached POST in v1_recipes_id_reviews")
+        app.logger.debug(request.headers)
+        user = validate_firebase_token_return_user(request)
+
+        if user and user != 'expired':
+            try:
+                data = request.get_json()
+                app.logger.debug(data)
+            except Exception:
+                return make_response(jsonify({'status': 'fail'}), 400)
+            
+        elif user == 'expired':
+            return make_response(jsonify({'status': 'expired'}), 401)
+        else:
+            return make_response(jsonify({'status': 'failed'}), 401)
+        
+        schema = {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "body": {"type": "string"},
+                "score": {"type": "number"}
+                }
+            }
+           
+        try:
+            validate(instance=data, schema=schema)
+        except Exception:
+            app.logger.debug("JSON validating failed")
+            return make_response(jsonify({'status': 'bad JSON'}), 400)
+        
+        if data['recommend'].lower() == 'true' or data['recommend'].lower() == 'yes':
+            data['recommend'] = 'Yes'
+        elif data['recommend'].lower() == 'false' or data['recommend'].lower() == 'no':
+            data['recommend'] = 'No'
+        else:
+            data['recommend'] = None
+        
+        data['authorId'] = user['_id']
+        data["created_date"] = int(time.time())
+        data["recipeId"] = recipeId
+        
+        try:
+            newReview = Reviews.createDocument(data)
+            newReview.save()
+        except Exception:
+            return make_response(jsonify({'status': 'fail'}), 400)
+        
+        #update the recipe with Metadata
+        try:
+            aqlScore = 'FOR doc in Reviews FILTER doc.recipeId == "' + recipeId + '" COLLECT AGGREGATE score = AVG(doc.score) RETURN score'
+            aqlCount = 'FOR doc in Reviews FILTER doc.recipeId == "' + recipeId + '" COLLECT WITH COUNT INTO length RETURN length'
+            s = cookingDB.AQLQuery(aqlScore, rawResults=True)
+            c = cookingDB.AQLQuery(aqlCount, rawResults=True)
+            score = round(s.response['result'][0],2)
+            count = c.response['result'][0]
+            recipe = Recipes[recipeId]
+            recipe['rating'] = score
+            recipe['ratingCount'] = count
+            recipe.save()
+        except Exception:
+            pass
+
+        return make_response(jsonify({"reviews": [newReview.getStore()]}), 200)
+    elif request.method == "PUT":
+        return
+    elif request.method == "DELETE":
+        return
+    else:
+        return
+
+
 
 @apiView.route('/v1/recipeTypes', methods=['GET'])
 def v1_recipeTypes():
