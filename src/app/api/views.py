@@ -1206,9 +1206,9 @@ def v1_recipes():
 
         elif recipeType:
             recipeType = recipeType.lower()
-            aql += 'FILTER r.recipeType == "' + recipeType + '" '
+            aql += 'r.recipeType == "' + recipeType + '" '
             
-        aql += ' sort r.created_date DESC LIMIT ' + str(nextOffset) \
+        aql += 'sort r.created_date DESC LIMIT ' + str(nextOffset) \
             + ', ' + str(limit) + ' RETURN r'
         
         app.logger.debug("this is aql")
