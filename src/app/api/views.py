@@ -1190,7 +1190,7 @@ def v1_recipes():
         aql = 'FOR r in Recipes FILTER '
         
         if user == None or user == 'expired':
-            aql += 'r.visibility != "private" FILTER'
+            aql += 'r.visibility != "private" FILTER '
 
         if q_user:
             app.logger.debug("doing recipeId or q_user")
