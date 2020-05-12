@@ -1334,8 +1334,11 @@ def v1_recipes_id(recipeId):
         except Exception:
             return make_response(jsonify({'status': 'not found'}), 404)
         
-        if recipe['visibility'] == 'private' and user['_id'] != recipe['authorId']:
-            return make_response(jsonify({'status': 'not found'}), 401)
+        if recipe['visibility'] == 'private':
+            if user == None or user == 'expired':
+                return make_response(jsonify({'status': 'not found'}), 401)
+            if user['_id'] != recipe['authorId']:
+                return make_response(jsonify({'status': 'not found'}), 401)
         
         recipes = {"recipes": []}
         recipes = loadRecipe(recipe.getStore(), recipes)
@@ -1356,6 +1359,7 @@ def v1_recipes_id_reviews(recipeId):
     global db
     global cookingDB
     global Reviews
+    global Users
     
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_recipes_id_reviews")
@@ -1387,6 +1391,11 @@ def v1_recipes_id_reviews(recipeId):
         else:
             reviews['nextOffset'] = int(offset) + int(limit)
             reviews['moreResults'] = True
+            
+        for i, review in enumerate(reviews['reviews']):
+            app.logger.debug(review['authorId'])
+            u = Users[review['authorId'].split('/')[1]]
+            reviews['reviews'][i]['authorId'] = u.displayName
         
         app.logger.debug(reviews)
         return make_response(jsonify(reviews), 200)
