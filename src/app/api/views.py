@@ -1062,6 +1062,8 @@ def v1_timeline():
 # Need a put method to update user
 @apiView.route('/v1/users', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def v1_users():
+    global Users
+
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_user")
         app.logger.debug(request.headers)
@@ -1125,6 +1127,9 @@ def v1_users():
             user = add_user(email,
                             uid,
                             name)
+
+            return make_response(jsonify({'status': 'ok'}), 200)
+
             if user:
                 return make_response(jsonify({'status': 'ok'}), 201)
             else:
