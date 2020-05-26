@@ -1313,7 +1313,7 @@ def v1_recipes():
     else:
         return
 
-@apiView.route('/v1/recipes/<recipeId>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+@apiView.route('/v1/recipes/<recipeId>', methods=['GET', 'PATCH', 'POST', 'PUT', 'DELETE'])
 def v1_recipes_id(recipeId):
     global Recipes
     global db
@@ -1344,6 +1344,64 @@ def v1_recipes_id(recipeId):
         recipes = loadRecipe(recipe.getStore(), recipes)
         
         return make_response(jsonify(recipes),200)
+    elif request.method == "PATCH":
+        app.logger.debug("Reached PATCH in v1_recipes_id")
+        app.logger.debug(request.headers)
+        user = validate_firebase_token_return_user(request)
+        
+        if '/' in recipeId:
+            r = recipeId.split('/')
+            recipeId = r[1]
+        
+        try:
+            recipe = Recipes[recipeId]
+        except Exception:
+            return make_response(jsonify({'status': 'not found'}), 404)
+        
+        if user._id != recipe.authorId:
+            return make_response(jsonify({'status': 'Unauthorized'}), 401)
+        
+        try:
+            data = request.get_json()
+            app.logger.debug(data)
+        except Exception:
+            return make_response(jsonify({'status': 'fail'}), 400)
+        
+        goodKeys = ["cookTime",
+                    "cusine",
+                    "description",
+                    "directions",
+                    "images",
+                    "ingredients",
+                    "mealTime",
+                    "notes",
+                    "prepTime",
+                    "recipeSubType",
+                    "recipeType",
+                    "servings",
+                    "source",
+                    "title",
+                    "visibility"
+                    ]
+        
+        for key, value in data.items():
+            if key not in goodKeys:
+                continue
+            
+            if key == "images":
+                pass
+            elif key == "ingredients":
+                pass
+            else:
+                recipe[key] = value
+        
+        try:
+            recipe.save()
+        except Exception:
+            return make_response(jsonify({'status': 'database error'}), 500)
+        
+        return make_response(jsonify({'status': 'ok'}), 200) 
+
     elif request.method == "POST":
         return
     elif request.method == "PUT":
@@ -1472,6 +1530,57 @@ def v1_recipes_id_reviews(recipeId):
         return
 
 
+@apiView.route('/v1/recipes/<recipeId>/bookmarks', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def v1_recipes_id_bookmarks(recipeId):
+    global Recipes
+    global db
+    global cookingDB
+    global Users
+
+    if request.method == "GET":
+        app.logger.debug("Reached GET in v1_recipes_id_bookmarks")
+        return
+    elif request.method == "POST":
+        app.logger.debug("Reached POST in v1_recipes_id_bookmarks")
+        app.logger.debug(request.headers)
+        user = validate_firebase_token_return_user(request)
+
+        if user and user != 'expired':
+            try:
+                data = request.get_json()
+                app.logger.debug(data)
+            except Exception:
+                return make_response(jsonify({'status': 'fail'}), 400)
+            
+            schema = {
+                "type": "object",
+                "properties": {
+                    "recipeId": {"type": "string"},
+                    "bookmarked": {"type": "string"},
+                    }
+                }
+            
+            try:
+                validate(instance=data, schema=schema)
+            except Exception:
+                app.logger.debug("JSON validating failed")
+                return make_response(jsonify({'status': 'bad JSON'}), 400)
+
+
+
+
+
+        elif user == 'expired':
+            return make_response(jsonify({'status': 'expired'}), 401)
+        else:
+            return make_response(jsonify({'status': 'failed'}), 401)
+        return
+    elif request.method == "PUT":
+        return
+    elif request.method == "DELETE":
+        return
+    else:
+        return
 
 @apiView.route('/v1/recipeTypes', methods=['GET'])
 def v1_recipeTypes():
