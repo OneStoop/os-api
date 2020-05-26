@@ -1358,7 +1358,7 @@ def v1_recipes_id(recipeId):
         except Exception:
             return make_response(jsonify({'status': 'not found'}), 404)
         
-        if user._id != recipe.authorId:
+        if user['_id'] != recipe.authorId:
             return make_response(jsonify({'status': 'Unauthorized'}), 401)
         
         try:
@@ -1389,8 +1389,6 @@ def v1_recipes_id(recipeId):
                 continue
             
             if key == "images":
-                pass
-            elif key == "ingredients":
                 pass
             else:
                 recipe[key] = value
