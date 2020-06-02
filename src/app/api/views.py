@@ -1123,17 +1123,17 @@ def v1_users():
             email = decoded_token['email']
             uid = decoded_token['uid']
             name = request.args.get('name') or None
-
-            user = add_user(email,
-                            uid,
-                            name)
-
-            return make_response(jsonify({'status': 'ok'}), 200)
-
-            if user:
-                return make_response(jsonify({'status': 'ok'}), 201)
+            
+            existingUser = get_user(email)
+            
+            if existingUser:
+                return make_response(jsonify({'status': 'ok'}), 200)
             else:
-                return make_response(jsonify({'status': 'failed'}), 400)
+                user = add_user(email,
+                                uid,
+                                name)
+                return make_response(jsonify({'status': 'ok'}), 200)
+
         elif decoded_token == 'expired':
             return make_response(jsonify({'status': 'expired'}), 401)
         else:
