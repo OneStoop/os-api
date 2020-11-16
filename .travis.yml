@@ -6,13 +6,13 @@ branches:
 services:
 - docker
 before_install:
-- openssl aes-256-cbc -K $encrypted_d15bcc7ddde5_key -iv $encrypted_d15bcc7ddde5_iv
-  -in onestoop-73f05c458f5a.json.enc -out onestoop-73f05c458f5a.json -d
+- openssl aes-256-cbc -K $encrypted_94b7d3a19d35_key -iv $encrypted_94b7d3a19d35_iv
+  -in onestoop-fe7eb-0059586fba52.json.enc -out onestoop-fe7eb-0059586fba52.json -d
 deploy:
   provider: gae
   skip_cleanup: true
-  keyfile: "onestoop-73f05c458f5a.json"
-  project: "onestoop-fe7eb"
+  keyfile: onestoop-fe7eb-0059586fba52.json
+  project: onestoop-fe7eb
   no_promote: true
   on:
     branch: master
