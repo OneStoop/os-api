@@ -2,7 +2,8 @@ import firebase_admin
 from flask import Flask
 from firebase_admin import credentials
 from flask_cors import CORS
-import boto3
+#import boto3
+from google.cloud import storage
 
 app = Flask(__name__)
 app.config.from_object('config')
@@ -13,28 +14,32 @@ CORS(app, resources={r"/v1/*": {"origins": "*"}})
 app.config['CORS_HEADERS'] = 'Content-Type'
 
 
-boto3Session = boto3.session.Session()
-botoSession = boto3Session.client('s3',
-                                  region_name='nyc3',
-                                  endpoint_url='https://onestoop00001.nyc3.digitaloceanspaces.com',
-                                  aws_access_key_id=app.config['SPACES_KEY'],
-                                  aws_secret_access_key=app.config['SPACES_SECRET'])
+#boto3Session = boto3.session.Session()
+#botoSession = boto3Session.client('s3',
+                                  #region_name='nyc3',
+                                  #endpoint_url='https://onestoop00001.nyc3.digitaloceanspaces.com',
+                                  #aws_access_key_id=app.config['SPACES_KEY'],
+                                  #aws_secret_access_key=app.config['SPACES_SECRET'])
 
-cos = boto3.resource('s3',
-                     region_name='nyc3',
-                     endpoint_url='https://onestoop00001.nyc3.digitaloceanspaces.com',
-                     aws_access_key_id=app.config['SPACES_KEY'],
-                     aws_secret_access_key=app.config['SPACES_SECRET'])
+#cos = boto3.resource('s3',
+                     #region_name='nyc3',
+                     #endpoint_url='https://onestoop00001.nyc3.digitaloceanspaces.com',
+                     #aws_access_key_id=app.config['SPACES_KEY'],
+                     #aws_secret_access_key=app.config['SPACES_SECRET'])
 
 
-try:
-    buckets = cos.buckets.all()
-    for bucket in buckets:
-        print("Bucket Name: {0}".format(bucket.name))
-except ClientError as be:
-    print("CLIENT ERROR: {0}\n".format(be))
-except Exception as e:
-    print("Unable to retrieve list buckets: {0}".format(e))
+#try:
+    #buckets = cos.buckets.all()
+    #for bucket in buckets:
+        #print("Bucket Name: {0}".format(bucket.name))
+#except ClientError as be:
+    #print("CLIENT ERROR: {0}\n".format(be))
+#except Exception as e:
+    #print("Unable to retrieve list buckets: {0}".format(e))
+
+gcsClient = storage.Client()
+#gcsBucket = client.get_bucket('onestoopimages01')
+
 
 if (app.debug):
     from werkzeug.debug import DebuggedApplication

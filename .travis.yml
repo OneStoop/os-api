@@ -1,26 +1,18 @@
 language: bash
-
 sudo: required
-
 branches:
   only:
   - master
-
 services:
 - docker
-
 before_install:
-  - curl -LO https://storage.googleapis.com/kubernetes-release/release/`curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt`/bin/linux/amd64/kubectl
-  - chmod +x kubectl && sudo mv kubectl /usr/local/bin/kubectl
-  - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
-  - docker build -t onestoop/osapi:$TRAVIS_BUILD_NUMBER .
-  - docker push onestoop/osapi
-
-script:
-- bash scripts/updateKube.sh
-
+- openssl aes-256-cbc -K $encrypted_d15bcc7ddde5_key -iv $encrypted_d15bcc7ddde5_iv
+  -in onestoop-73f05c458f5a.json.enc -out onestoop-73f05c458f5a.json -d
 deploy:
-  provider: script
-  script: bash scripts/deploy.sh
+  provider: gae
+  skip_cleanup: true
+  keyfile: "onestoop-73f05c458f5a.json"
+  project: "onestoop-fe7eb"
+  no_promote: true
   on:
     branch: master

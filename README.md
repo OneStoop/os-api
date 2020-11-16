@@ -23,7 +23,7 @@ Prerequisites:
 1) Python 3.6 or greater.
 2) A firebase account [https://firebase.google.com/](https://firebase.google.com/)
 Authentication should be enabled with at least Email/Password sign-in method
-3) A IBM Cloud account [https://cloud.ibm.com/](https://cloud.ibm.com/) with Cloud Object Storage provisioned
+3) A Google Cloud account [https://cloud.google.com/](https://cloud.google.com/) with Cloud Storage provisioned
 
 Steps:
 1) Clone this repo: `git clone git@github.com:OneStoop/os-api.git`

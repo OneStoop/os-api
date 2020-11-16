@@ -1,7 +1,8 @@
 import json
 from datetime import datetime
 #from ...helpers.get_signed_url import get_signed_url
-from app import botoSession
+#from app import botoSession
+import requests as botoSession
 
 class objdict(dict):
     def __getattr__(self, name):

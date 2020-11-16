@@ -16,3 +16,5 @@ SPACES_SECRET = os.environ.get('SPACES_SECRET')
 ARANGODB_SETTINGS = json.loads(os.environ.get('ARANGODB_SETTINGS'))
 
 FIREBASE_CONFIG = json.loads(os.environ.get('FIREBASE_CONFIG'))
+print(os.getcwd())
+GOOGLE_APPLICATION_CREDENTIALS = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')

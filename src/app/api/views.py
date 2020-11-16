@@ -9,14 +9,13 @@ from datetime import datetime, timedelta, timezone
 from itertools import chain
 from firebase_admin import auth
 from jsonschema import validate
-from app import app, cos, botoSession
+from app import app, gcsClient #cos, botoSession, 
 from pyArango.connection import *
-from app.api.modules.Image import Image as ImageObj
 from app.api.modules.Timeline import Feed, TimelineJSON
+from google.auth import compute_engine
+from google.cloud import storage
+from google.oauth2 import service_account
 
-#
-# Some notes
-# Need to support videos.
 
 class objdict(dict):
     def __getattr__(self, name):
@@ -248,10 +247,13 @@ def getVisibility(user, q_user):
     return visibility
 
 
-def delete_file_from_cos(bucket, key):
+def delete_file_from_cos(bucketName, key):
     app.logger.debug("starting delete")
     try:
-        cos.Object(bucket, key).delete()
+        #cos.Object(bucket, key).delete()
+        bucket = gcsClient.get_bucket(bucketName)
+        blob = bucket.blob(key)
+        blob.delete()
     except Exception as e:
         app.logger.debug(e)
         return None
@@ -259,7 +261,7 @@ def delete_file_from_cos(bucket, key):
     return 1
 
 
-def upload_file_to_cos(imgFile, bucket, user):
+def upload_file_to_cos(imgFile, bucketName, user):
     app.logger.debug("starting upload")
     filename = imgFile.filename
     fileType = filename.rsplit('.', 1)[1].lower()
@@ -295,15 +297,21 @@ def upload_file_to_cos(imgFile, bucket, user):
     try:
         newFile.seek(0)
         ExtraArgs = {'Metadata': {'owner': user['_id'], 'filename': filename}}
-        cos.Object(bucket, key).upload_fileobj(newFile,
-                                               ExtraArgs=ExtraArgs
-                                               )
+        #cos.Object(bucket, key).upload_fileobj(newFile,
+                                               #ExtraArgs=ExtraArgs
+                                               #)
+        bucket = gcsClient.get_bucket(bucketName)
+        blob = bucket.blob(key)
+        #nf1 = newFile.read()
+        #nf = nf1.decode("utf-8") 
+        blob.upload_from_file(newFile)
+        
     except Exception as e:
         print("Error: ", e)
         return None
 
     app.logger.debug("done upload")
-    return key
+    return {'key': key, 'blob': blob}
 
 
 def validate_firebase_token(token):
@@ -359,10 +367,26 @@ def validate_firebase_token_return_user(request):
 def get_image_url(image):
     #image = objdict(i)
 
-    url = botoSession.generate_presigned_url(ClientMethod="get_object",
-                                             Params={'Bucket': image['bucket'],
-                                             'Key': image['key']},
-                                              ExpiresIn=86400)
+    #url = botoSession.generate_presigned_url(ClientMethod="get_object",
+                                             #Params={'Bucket': image['bucket'],
+                                             #'Key': image['key']},
+                                              #ExpiresIn=86400)
+    #credentials = compute_engine.Credentials(app.config['GOOGLE_APPLICATION_CREDENTIALS']), project=app.config['FIREBASE_CONFIG']["project_id"]
+    app.logger.debug(app.config['GOOGLE_APPLICATION_CREDENTIALS'])
+    credentials = service_account.Credentials.from_service_account_file(app.config['GOOGLE_APPLICATION_CREDENTIALS'])
+    storage_client = storage.Client(credentials=credentials)
+    #storage_client = storage.Client()
+    bucket = storage_client.bucket(image['bucket'])
+    blob = bucket.blob(image['key'])
+
+    url = blob.generate_signed_url(
+        version="v4",
+        # This URL is valid for 15 minutes
+        expiration=timedelta(hours=24),
+        # Allow GET requests using this URL.
+        method="GET",
+    )
+
         
     imagePath = url
     data = {'url': imagePath,
@@ -388,8 +412,10 @@ def before_request():
     global Recipes
     global Reviews
     global conn
+    
+    app.logger.debug(app.config['ARANGODB_SETTINGS']['host'] + ":" + app.config['ARANGODB_SETTINGS']['port'])
 
-    conn = Connection(arangoURL='https://db.onestoop.com:8529',
+    conn = Connection(arangoURL=app.config['ARANGODB_SETTINGS']['host'] + ":" + app.config['ARANGODB_SETTINGS']['port'],
                       username=app.config['ARANGODB_SETTINGS']['username'],
                       password=app.config['ARANGODB_SETTINGS']['password'],)
     db = conn['onestoop']
@@ -561,7 +587,7 @@ def v1_requests():
                 return make_response(jsonify({'status': 'failed'}), 400)
             
             visibility = getVisibility(user, q_user)
-            if visibility is 'friends' or visibility is 'self':
+            if visibility == 'friends' or visibility == 'self':
                 return make_response(jsonify({'status': 'conflict'}), 409)
             
             newRequest = Requests.createDocument({"requestor": user['_id'],
@@ -601,7 +627,7 @@ def v1_friends():
 
     if request.method == "GET":
         visibility = getVisibility(user, q_user)
-        if visibility is 'friends' or visibility is 'self':
+        if visibility == 'friends' or visibility == 'self':
             limit = int(request.args.get("limit", default=10))
             page = int(request.args.get("page", default=1))
             data = listFriends(user=q_user, limit=limit, page=page)
@@ -640,7 +666,7 @@ def v1_images():
         if user and user != 'expired':
             #bucket = 'onestoop-ussouth'
             #bucket = 'mcontent'
-            bucket = "onestoop00001"
+            bucket = "onestoopimages01"
 
             if 'file' not in request.files:
                 app.logger.debug('file not in request.files')
@@ -655,17 +681,12 @@ def v1_images():
                 return make_response(responseData, 400)
 
             if imgFile and allowed_file(imgFile.filename):
-                key = upload_file_to_cos(imgFile, bucket, user)
+                imgBlob = upload_file_to_cos(imgFile, bucket, user)
+                key = imgBlob['key']
                 uid = key.split('.')
+                blob = imgBlob['blob']
 
                 if key:
-                    #image = ImageObj(user_id=user['_id'],
-                                     #image_uid=uid[0],
-                                     #bucket=bucket,
-                                     #key=key,
-                                     #Images=Images
-                                     #)
-                    #image.publish()
                     newImage = Images.createDocument()
                     data = {'user_id': user['_id'],
                             'created_date': int(datetime.utcnow().timestamp()),
@@ -678,10 +699,18 @@ def v1_images():
         
                     newImage.save()
         
-                    url = botoSession.generate_presigned_url(ClientMethod="get_object",
-                                                             Params={'Bucket': bucket,
-                                                                    'Key': key},
-                                                             ExpiresIn=86400)
+                    #url = botoSession.generate_presigned_url(ClientMethod="get_object",
+                                                             #Params={'Bucket': bucket,
+                                                                    #'Key': key},
+                                                             #ExpiresIn=86400)
+
+                    url = blob.generate_signed_url(
+                        version="v4",
+                        # This URL is valid for 24 hours
+                        expiration=timedelta(hours=24),
+                        # Allow GET requests using this URL.
+                        method="GET",
+                    )
                     imagePath = url
                     responseData = jsonify({'status': 'success',
                                             'imageID': newImage._key,
@@ -1150,11 +1179,14 @@ def loadRecipe(r, recipes):
     for iNum, imageID in enumerate(r['images']):
         try:
             image = Images[imageID]
-        except:
-            pass
-        image = get_image_url(image)
-        images.append(image)
-        r['images'] = images
+            image = get_image_url(image)
+            images.append(image)
+            r['images'] = images
+            app.logger.debug('this is images')
+            app.logger.debug(images)
+        except Exception as e:
+            app.logger.debug(e)
+        
     rId = r['_id'].split('/')
     r['_id'] = rId[1]
     recipes['recipes'].append(r)
@@ -1347,6 +1379,7 @@ def v1_recipes_id(recipeId):
         
         recipes = {"recipes": []}
         recipes = loadRecipe(recipe.getStore(), recipes)
+        app.logger.debug(recipes)
         
         return make_response(jsonify(recipes),200)
     elif request.method == "PATCH":
@@ -1524,7 +1557,14 @@ def v1_recipes_id_reviews(recipeId):
         except Exception:
             pass
 
-        return make_response(jsonify({"reviews": [newReview.getStore()]}), 200)
+        review = {"reviews": [newReview.getStore()]}
+        app.logger.debug(review)
+        #try:
+        u = Users[review['reviews'][0]['authorId'].split('/')[1]]
+        review['reviews'][0]['authorId'] = u.displayName
+        #except:
+            #pass
+        return make_response(jsonify(review), 200)
     elif request.method == "PUT":
         return
     elif request.method == "DELETE":
