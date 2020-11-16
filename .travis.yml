@@ -6,6 +6,8 @@ branches:
 services:
 - docker
 before_install:
+- openssl aes-256-cbc -K $encrypted_0cf0bb82cc50_key -iv $encrypted_0cf0bb82cc50_iv
+  -in app.yaml.enc -out app.yaml -d
 - openssl aes-256-cbc -K $encrypted_94b7d3a19d35_key -iv $encrypted_94b7d3a19d35_iv
   -in onestoop-fe7eb-0059586fba52.json.enc -out onestoop-fe7eb-0059586fba52.json -d
 deploy:
