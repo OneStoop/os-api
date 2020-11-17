@@ -16,5 +16,4 @@ deploy:
   keyfile: onestoop-fe7eb-0059586fba52.json
   project: onestoop-fe7eb
   no_promote: true
-  on:
-    branch: master
+  verbosity: error
