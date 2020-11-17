@@ -14,8 +14,8 @@ before_install:
   -in onestoop-fe7eb-0059586fba52.json.enc -out onestoop-fe7eb-0059586fba52.json -d
 deploy:
   provider: gae
-  skip_cleanup: true
+  skip_cleanup: false
   keyfile: onestoop-fe7eb-0059586fba52.json
   project: onestoop-fe7eb
-  no_promote: true
+  no_promote: false
   verbosity: error
