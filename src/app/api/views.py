@@ -11,6 +11,7 @@ from firebase_admin import auth
 from jsonschema import validate
 from app import app, gcsClient #cos, botoSession, 
 from pyArango.connection import *
+import pyArango
 from app.api.modules.Timeline import Feed, TimelineJSON
 from google.auth import compute_engine
 from google.cloud import storage
@@ -120,20 +121,37 @@ def add_user(email, uid, name):
 
 
 def format_user_response(user, visibility):
+    #convert user to dict if needed
+    if type(user) == pyArango.document.Document:
+        user = user.getStore()
+
+    # make sure the user object has all the keys we need
+    if "displayName" not in user.keys():
+        user["displayName"] = ""
+    if "created_date" not in user.keys():
+        user["created_date"] = 0
+    if "email" not in user.keys():
+        user["email"] = ""
+    if "visibility" not in user.keys():
+        user["visibility"] = None
+    if "_id" not in user.keys():
+        user["_id"] = None
+    
     if visibility == 'self' or visibility == 'friends':
-        responseData = {'created_date': 1571843230,
-                        'email': user['email'],
-                        'name': user['name'],
-                        'visibility': visibility,
-                        '_id': user['_id']
-                        }
+        responseData = {
+            'created_date': user['created_date'],
+            'email': user['email'],
+            'name': user['name'],
+            'displayName': user['displayName'],
+            'visibility': visibility,
+            '_id': user['_id']
+            }
     else:
-        responseData = {'created_date': 1571843230,
-                        'email': user['email'],
-                        'name': user['name'],
-                        'visibility': visibility,
-                        '_id': user['_id']
-                        }
+        responseData = {
+            'displayName': user['displayName'],
+            'visibility': visibility,
+            '_id': user['_id']
+            }
     return responseData
 
 
@@ -162,10 +180,13 @@ def get_user_by_id(uid):
     try:
         user = Users[uid]
     except Exception:
+        app.logger.debug("some error")
         user = None
 
+    app.logger.debug(user)
     app.logger.debug('done get_user_by_id')
     return user
+        
 
 def get_user_by_uuid(uid):
     app.logger.debug('starting get_user_by_uuid')
@@ -1171,6 +1192,19 @@ def v1_users():
         return make_response(jsonify({'status': 'failed'}), 400)
 
 
+@apiView.route('/v1/users/<userId>', methods=['GET', 'PATCH', 'POST', 'PUT', 'DELETE'])
+def v1_users_id(userId):
+    #global Users
+
+    if request.method == "GET":
+        app.logger.debug("Reached GET in v1_users_userId")
+        user = validate_firebase_token_return_user(request)
+        
+        qUser = get_user_by_id(userId)
+        visibility = getVisibility(user, qUser)
+        responseData = format_user_response(qUser, visibility)
+        return make_response(jsonify(responseData), 200)
+        
 
 ###########################
 def loadRecipe(r, recipes):
@@ -1270,7 +1304,7 @@ def v1_recipes():
             
         for rNum, r in enumerate(q):
             
-            if r['visibility'] == 'private':
+            if r['visibility'].lower() == 'private':
                 if user == None or user == 'expired':
                   pass
                 elif r['authorId'] != user['_id']:
@@ -1371,10 +1405,12 @@ def v1_recipes_id(recipeId):
         except Exception:
             return make_response(jsonify({'status': 'not found'}), 404)
         
-        if recipe['visibility'] == 'private':
+        if recipe['visibility'].lower() == 'private':
             if user == None or user == 'expired':
+                app.logger.debug("this should be private")
                 return make_response(jsonify({'status': 'not found'}), 401)
             if user['_id'] != recipe['authorId']:
+                app.logger.debug("this should be private")
                 return make_response(jsonify({'status': 'not found'}), 401)
         
         recipes = {"recipes": []}
@@ -1443,7 +1479,39 @@ def v1_recipes_id(recipeId):
     elif request.method == "PUT":
         return
     elif request.method == "DELETE":
-        return
+        app.logger.debug("Reached DELETE in v1_recipes_id")
+        app.logger.debug(request.headers)
+        user = validate_firebase_token_return_user(request)
+        
+        if '/' in recipeId:
+            r = recipeId.split('/')
+            recipeId = r[1]
+        
+        try:
+            recipe = Recipes[recipeId]
+        except Exception:
+            return make_response(jsonify({'status': 'not found'}), 404)
+        
+        if user['_id'] != recipe.authorId:
+            return make_response(jsonify({'status': 'Unauthorized'}), 401)
+        
+        # delete the reviews
+        try:
+            aql = 'FOR r in Reviews FILTER r.recipeId == "' + recipeId + '" ' \
+                ' REMOVE r in Reviews'
+            r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
+        except Exception:
+            return make_response(jsonify({'status': 'Error'}), 500)
+        
+        # delete the images?
+        
+        # delete recipe
+        try:
+            recipe.delete()
+        except Exception:
+            return make_response(jsonify({'status': 'Error'}), 500)
+        
+        return make_response(jsonify({'status': 'ok'}), 200)
     else:
         return
 
