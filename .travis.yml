@@ -1,5 +1,5 @@
-language: bash
 sudo: required
+language: python
 branches:
   only:
   - master

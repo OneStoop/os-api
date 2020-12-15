@@ -417,6 +417,28 @@ def get_image_url(image):
     return data
 
 
+def deleteImage(imageID):
+    try:
+        image = Images[imageID]
+    except Exception:
+        return False
+    
+    try:
+        credentials = service_account.Credentials.from_service_account_file(app.config['GOOGLE_APPLICATION_CREDENTIALS'])
+        storage_client = storage.Client(credentials=credentials)
+        bucket = storage_client.bucket(image['bucket'])
+        blob = bucket.blob(image['key'])
+        blob.delete()
+    except Exception:
+        return False
+    
+    try:
+        image.delete()
+    except Exception:
+        return False
+    
+    return True
+
 apiView = Blueprint('api', __name__)
 
 
@@ -1503,7 +1525,9 @@ def v1_recipes_id(recipeId):
         except Exception:
             return make_response(jsonify({'status': 'Error'}), 500)
         
-        # delete the images?
+        # delete the images
+        for image in recipe.images:
+            deleteImage(image)
         
         # delete recipe
         try:
