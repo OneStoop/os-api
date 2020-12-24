@@ -417,7 +417,8 @@ def get_image_url(image):
     return data
 
 
-def deleteImage(imageID):
+def deleteImage(imageObj):
+    imageID = imageObj['id']
     try:
         image = Images[imageID]
     except Exception:
@@ -1232,12 +1233,16 @@ def v1_users_id(userId):
 def loadRecipe(r, recipes):
     app.logger.debug("doign loadRecipe")
     images = []
-    for iNum, imageID in enumerate(r['images']):
+    #for iNum, imageID in enumerate(r['images']):
+    for iNum, imageObj in enumerate(r['images']):
+        imageID = imageObj['id']
         try:
             image = Images[imageID]
             image = get_image_url(image)
-            images.append(image)
-            r['images'] = images
+            #images.append(image)
+            images.append({"image": image, "position": int(imageObj['position'])})
+            #r['images'] = images
+            r['images'] = sorted(images, key = lambda i: i['position'])
             app.logger.debug('this is images')
             app.logger.debug(images)
         except Exception as e:
@@ -1386,6 +1391,11 @@ def v1_recipes():
             data['recipeType'] = data['recipeType'].lower()
             data['recipeSubType'] = data['recipeSubType'].lower()
             data["created_date"] = int(time.time())
+            
+            newImages = []
+            for i, image in enumerate(data['images']):
+                newImages.append({"id": image, "position": i})
+            data['images'] = newImages
             
             try:
                 newRecipe = Recipes.createDocument(data)
