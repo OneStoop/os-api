@@ -9,13 +9,14 @@ from datetime import datetime, timedelta, timezone
 from itertools import chain
 from firebase_admin import auth
 from jsonschema import validate
-from app import app, gcsClient #cos, botoSession, 
-from pyArango.connection import *
-import pyArango
+from app import app, gcsClient, DB #searchIndex #cos, botoSession,
+#from pyArango.connection import *
+#import pyArango
 from app.api.modules.Timeline import Feed, TimelineJSON
 from google.auth import compute_engine
 from google.cloud import storage
 from google.oauth2 import service_account
+from algoliasearch.search_client import SearchClient
 
 
 class objdict(dict):
@@ -42,20 +43,6 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 
-def http_decode(data):
-    data_unquoted = urllib.unquote(urllib.unquote(data))
-    http_codes = (
-        ("'", '&#39;'),
-        ('"', '&quot;'),
-        ('>', '&gt;'),
-        ('<', '&lt;'),
-        ('&', '&amp;')
-    )
-    for code in http_codes:
-        data_unquoted = data_unquoted.replace(code[1], code[0])
-    return data_unquoted
-
-
 def epoch_to_datetime(epoch):
     return (datetime(1970, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=int(epoch))).replace(tzinfo=pytz.utc)
 
@@ -63,67 +50,42 @@ def epoch_to_datetime(epoch):
 def datetime_to_epoch(dt):
     return int(dt.timestamp())
 
-
-def addFollowers(follower=None, following=None):
-    app.logger.debug("Reached addFollowers")
-    app.logger.debug(follower)
-    app.logger.debug(following)
-    try:
-        followingObject = Following.objects(user_uid=follower.uid).first()
-    except Exception:
-        followingObject = None
-
-    app.logger.debug(followingObject)
-    if followingObject is None:
-        try:
-            followingObject = Following(user_uid=follower.uid, following=[following.uid])
-            followingObject.save()
-        except Exception:
-            followingObject = None
-    else:
-        if following.uid not in followingObject.following:
-            followingObject.following += [following.uid]
-            followingObject.save()
+def getVisibility(user, q_user):
+    if user is None or q_user is None:
+        return None
 
     try:
-        followersObject = Followers.objects(user_uid=following.uid).first()
-    except Exception:
-        followersObject = None
+        user = user.to_dict()
+    except:
+        pass
 
-    if followersObject is None:
-        try:
-            followersObject = Followers(user_uid=following.uid, followers=[follower.uid])
-            followersObject.save()
-        except Exception:
-            followersObject = None
+    try:
+        q_user = q_user.to_dict()
+    except:
+        pass
+
+    if user['uid'] == q_user['uid']:
+        return "self"
     else:
-        if follower.uid not in followersObject.followers:
-            followersObject.followers += [follower.uid]
-            followersObject.save()
-
-    app.logger.debug("done addFollowers")
-    return followingObject
-
+        return "friends"
 
 def add_user(email, uid, name):
     app.logger.debug("Reached add_user")
 
     created = datetime_to_epoch((datetime.utcnow().replace(tzinfo=pytz.utc)))
-    newUser = Users.createDocument()
-    #newUser['_id'] = "Users/" + uid
-    #newUser['_key'] = uid
-    newUser['uid'] = uid
-    newUser['email'] = email
-    newUser['name'] = name
-    newUser['created_date'] = created
-    newUser.save()
+    data = {}
+    data['uid'] = uid
+    data['email'] = email
+    data['name'] = name
+    data['created_date'] = created
+    newUser = DB.collection(u'Users').document(uid).set(data)
     return newUser
 
 
 def format_user_response(user, visibility):
     #convert user to dict if needed
-    if type(user) == pyArango.document.Document:
-        user = user.getStore()
+    #if type(user) == pyArango.document.Document:
+        #user = user.getStore()
 
     # make sure the user object has all the keys we need
     if "displayName" not in user.keys():
@@ -136,7 +98,7 @@ def format_user_response(user, visibility):
         user["visibility"] = None
     if "_id" not in user.keys():
         user["_id"] = None
-    
+
     if visibility == 'self' or visibility == 'friends':
         responseData = {
             'created_date': user['created_date'],
@@ -144,41 +106,25 @@ def format_user_response(user, visibility):
             'name': user['name'],
             'displayName': user['displayName'],
             'visibility': visibility,
-            '_id': user['_id']
+            '_id': user['_id'],
+            'uid': user['uid']
             }
     else:
         responseData = {
             'displayName': user['displayName'],
             'visibility': visibility,
-            '_id': user['_id']
+            '_id': user['_id'],
+            'uid': user['uid']
             }
     return responseData
-
-
-def get_feed(user, start_time, end_time, limit):
-    global db
-    app.logger.debug('starting get_feed')
-
-    data = Feed(user_id=user['_id'],
-                start_time=start_time,
-                end_time=end_time,
-                limit=limit, db=db)
-
-    app.logger.debug('done get_feed')
-
-    return data
 
 
 def get_user_by_id(uid):
     app.logger.debug('starting get_user_by_id')
     app.logger.debug(uid)
-    
-    if '/' in uid:
-        u = uid.split('/')
-        uid = u[1]
 
     try:
-        user = Users[uid]
+        user = DB.collection(u'Users').document(uid).get()
     except Exception:
         app.logger.debug("some error")
         user = None
@@ -186,86 +132,20 @@ def get_user_by_id(uid):
     app.logger.debug(user)
     app.logger.debug('done get_user_by_id')
     return user
-        
-
-def get_user_by_uuid(uid):
-    app.logger.debug('starting get_user_by_uuid')
-    app.logger.debug(uid)
-
-    if '/' in uid:
-        u = uid.split('/')
-        uid = u[1]
-
-    try:
-        #user = Users_by_uuid.objects(uid=uid).first()
-        #user = Users.objects(collection='Users', uid=uid).first()
-        user = Users.fetchFirstExample({'uid': uid}, 1)
-    except Exception:
-        user = None
-
-    app.logger.debug(user['email'])
-    app.logger.debug('done get_user_by_uuid')
-    return user
 
 
 def get_user(email):
     app.logger.debug('starting get_user')
     app.logger.debug(email)
 
-    user = Users.fetchFirstExample({'email': email}, 1)
-    if len(user) == 1:
-        app.logger.debug(user[0])
+    #user = Users.fetchFirstExample({'email': email}, 1)
+    userQuery = DB.collection(u'Users').where(u'email', u'==', email).get()
+    if len(userQuery) == 1:
         app.logger.debug('done get_user')
-        return user[0]
+        return userQuery[0]
     else:
         app.logger.debug('done get_user')
         return None
-    #user = Users.objects(collection='Users', email=email).first()
-    ##user = UsersM.objects(email=email).first()
-    #try:
-        #user_search = session.prepare('SELECT * from users_by_email where email=?')
-        #user_results = session.execute(user_search, [email])
-        #user = objdict(user_results[0])
-    #except Exception:
-        #user = None
-
-    app.logger.debug(user)
-    app.logger.debug('done get_user')
-    return user
-
-
-def getVisibility(user, q_user):
-    # user=the logged in user
-    # q_user=the person we need to find the relationship with
-
-    app.logger.debug('starting getVisibility')
-    if user is None or q_user is None:
-        return None
-
-    if user['_id'] == q_user['_id']:
-        return "self"
-
-    aql = 'FOR r IN Relations Filter r._from == "' + user['_id'] + '" AND ' \
-        'r._to == "' + q_user['_id'] + '" LIMIT 1 RETURN r'
-    q = db.AQLQuery(aql, rawResults=True, batchSize=100)
-    
-    if len(q) == 0:
-        following = False
-        friends = False
-    else:
-        following = q[0]['follow']
-        friends = q[0]['friend']
-        
-    if following == False and friends == False:
-        visibility = None
-    elif following == True and friends == False:
-        visibility = 'following'
-    elif friends == True:
-        visibility = 'friends'
-
-    app.logger.debug(visibility)
-    app.logger.debug('done getVisibility')
-    return visibility
 
 
 def delete_file_from_cos(bucketName, key):
@@ -317,16 +197,16 @@ def upload_file_to_cos(imgFile, bucketName, user):
     app.logger.debug('done resizing')
     try:
         newFile.seek(0)
-        ExtraArgs = {'Metadata': {'owner': user['_id'], 'filename': filename}}
+        ExtraArgs = {'Metadata': {'owner': user['uid'], 'filename': filename}}
         #cos.Object(bucket, key).upload_fileobj(newFile,
                                                #ExtraArgs=ExtraArgs
                                                #)
         bucket = gcsClient.get_bucket(bucketName)
         blob = bucket.blob(key)
         #nf1 = newFile.read()
-        #nf = nf1.decode("utf-8") 
+        #nf = nf1.decode("utf-8")
         blob.upload_from_file(newFile)
-        
+
     except Exception as e:
         print("Error: ", e)
         return None
@@ -386,13 +266,6 @@ def validate_firebase_token_return_user(request):
 
 
 def get_image_url(image):
-    #image = objdict(i)
-
-    #url = botoSession.generate_presigned_url(ClientMethod="get_object",
-                                             #Params={'Bucket': image['bucket'],
-                                             #'Key': image['key']},
-                                              #ExpiresIn=86400)
-    #credentials = compute_engine.Credentials(app.config['GOOGLE_APPLICATION_CREDENTIALS']), project=app.config['FIREBASE_CONFIG']["project_id"]
     app.logger.debug(app.config['GOOGLE_APPLICATION_CREDENTIALS'])
     credentials = service_account.Credentials.from_service_account_file(app.config['GOOGLE_APPLICATION_CREDENTIALS'])
     storage_client = storage.Client(credentials=credentials)
@@ -408,10 +281,9 @@ def get_image_url(image):
         method="GET",
     )
 
-        
     imagePath = url
     data = {'url': imagePath,
-            'id': str(image['image_uid']),
+            'id': str(image['uid']),
             'key': image['key']
             }
     return data
@@ -420,10 +292,11 @@ def get_image_url(image):
 def deleteImage(imageObj):
     imageID = imageObj['id']
     try:
-        image = Images[imageID]
+        imageObj = DB.collection(u'Images').document(imageID).get()
+        image = imageObj.to_dict()
     except Exception:
         return False
-    
+
     try:
         credentials = service_account.Credentials.from_service_account_file(app.config['GOOGLE_APPLICATION_CREDENTIALS'])
         storage_client = storage.Client(credentials=credentials)
@@ -432,12 +305,12 @@ def deleteImage(imageObj):
         blob.delete()
     except Exception:
         return False
-    
+
     try:
-        image.delete()
+        imageObj.delete()
     except Exception:
         return False
-    
+
     return True
 
 apiView = Blueprint('api', __name__)
@@ -445,46 +318,18 @@ apiView = Blueprint('api', __name__)
 
 @app.before_request
 def before_request():
-    global db
-    global cookingDB
-    global Comments
-    global Images
-    global Posts
-    global Relations
-    global Users
-    global Requests
-    global Recipes
-    global Reviews
-    global conn
-    
-    app.logger.debug(app.config['ARANGODB_SETTINGS']['host'] + ":" + app.config['ARANGODB_SETTINGS']['port'])
+    global searchIndex
 
-    conn = Connection(arangoURL=app.config['ARANGODB_SETTINGS']['host'] + ":" + app.config['ARANGODB_SETTINGS']['port'],
-                      username=app.config['ARANGODB_SETTINGS']['username'],
-                      password=app.config['ARANGODB_SETTINGS']['password'],)
-    db = conn['onestoop']
-    Comments = db['Comments']
-    Images = db['Images']
-    Posts = db['Posts']
-    Relations = db['Relations']
-    Users = db['Users']
-    Requests = db['Requests']
-    
-    cookingDB = conn['cooking']
-    Recipes = cookingDB['Recipes']
-    Reviews = cookingDB['Reviews']
+    client = SearchClient.create(app.config['ALGOLIA_CONFIG']["appId"],
+                                 app.config['ALGOLIA_CONFIG']["searchKey"])
+    searchIndex = client.init_index(app.config['ALGOLIA_CONFIG']["index"])
+    searchIndex.set_settings({'attributesForFaceting': ['visibility']})
 
-    ## Bluemix proxy sets a $WSSC header to either http or https.
-    ## All triffic to flask is http.
-    ## So if $WSSC is set to http we should redirect the user to https.
-    #if request.headers.get('$WSSC') == "http":
-        #url = request.url.replace('http://', 'https://', 1)
-        #return redirect(url, code=301)
 
 @app.teardown_request
 def teardown_request(error=None):
     pass
-    
+
 @apiView.route('/', methods=['GET'])
 def root():
     return make_response(jsonify({'status': 'ok'}), 200)
@@ -495,221 +340,16 @@ def version():
 
 
 #
-# Would like to support sub-comments
-# Would like to support images in comments
-@apiView.route('/v1/comments', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def v1_comments():
-    global Comments
-
-    if request.method == "GET":
-        return make_response(jsonify({'status': 'ok'}), 200)
-    elif request.method == "POST":
-        app.logger.debug("Reached POST in v1_comments")
-        user = validate_firebase_token_return_user(request)
-
-        if user and user != 'expired':
-            app.logger.debug("decoded worked")
-            try:
-                commentJSON = request.get_json()
-                app.logger.debug(commentJSON)
-                body = commentJSON['comment']
-            except Exception:
-                return make_response(jsonify({'status': 'fail'}), 400)
-
-            try:
-                newComment = Comments.createDocument({"post_id": commentJSON['post_id'],
-                                       "author_id": user['_id'],
-                                       "body": body,
-                                       "created_date": int(time.time()),
-                                       "images": None})
-                newComment.save()
-            except Exception:
-                newComment = None
-
-            if newComment:
-                return make_response(jsonify(newComment.getStore()), 201)
-            else:
-                return make_response(jsonify({'status': 'failed'}), 400)
-
-        elif user == 'expired':
-            return make_response(jsonify({'status': 'expired'}), 401)
-        else:
-            return make_response(jsonify({'status': 'failed'}), 401)
-    elif request.method == "PUT":
-        app.logger.debug("Reached PUT in v1_comments")
-        user = validate_firebase_token_return_user(request)
-
-        if user and user != 'expired':
-            app.logger.debug("decoded worked")
-            
-            commentID = request.args.get("commentID", default=None)
-            if commentID is None:
-                responseData = jsonify({'status': 'missing arg commentID'})
-                return make_response(responseData, 400)
-            
-            try:
-                commentJSON = request.get_json()
-                app.logger.debug(commentJSON)
-                body = commentJSON['comment']
-            except Exception:
-                return make_response(jsonify({'status': 'fail'}), 400)
-            
-            thread = request.args.get("thread", default=False)
-            if thread:
-                try:
-                    comment = Comments[commentID]
-                except Exception:
-                    return make_response(jsonify({'status': 'not found'}), 404)
-
-                comment['thread'].append({'author': user['_id'],
-                                          'body': body,
-                                          'created_date': int(time.time())
-                                          })
-                comment.save()
-                return make_response(jsonify({'author': user['_id'],
-                                              'body': body,
-                                            'created_date': int(time.time())
-                                            }), 201)
-            else:
-                return make_response(jsonify({'status': 'not implemented'}), 200)
-
-        elif user == 'expired':
-            return make_response(jsonify({'status': 'expired'}), 401)
-        else:
-            return make_response(jsonify({'status': 'failed'}), 401)
-
-
-# need to handle empty feed
-@apiView.route('/v1/feed', methods=['GET'])
-def v1_feed():
-    if request.method == "GET":
-        app.logger.debug("Reached GET in v1_feed")
-        app.logger.debug(request.headers)
-        user = validate_firebase_token_return_user(request)
-
-        start_time = request.args.get("startTime", default=1546300800)
-        end_time = request.args.get("endTime", default=int(datetime.utcnow().timestamp()))
-        limit = request.args.get("limit", default=10)
-
-        if user and user != 'expired':
-            feed_data = get_feed(user, start_time, end_time, limit)
-            data = jsonify({"posts": feed_data})
-            app.logger.debug(data)
-            return make_response(data, 200)
-        elif user == 'expired':
-            app.logger.debug('expired')
-            return make_response(jsonify({'status': 'expired'}), 401)
-        else:
-            app.logger.debug('some other issue?')
-            app.logger.debug(user)
-            return make_response(jsonify({'status': 'failed'}), 401)
-    else:
-        return make_response(jsonify({'status': 'failed'}), 400)
-
-
-@apiView.route('/v1/requests', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def v1_requests():
-    global Requests
-    app.logger.debug("Reached v1_requests")
-    user = validate_firebase_token_return_user(request)
-
-    if user is None or user == 'expired':
-        return make_response(jsonify({'status': 'failed'}), 401)
-    
-    requestType = request.args.get("type", default=None)
-    
-    if request.method == "GET":
-        responseData = jsonify({'status': 'ok'})
-        return make_response(responseData, 200)
-    elif request.method == "POST":
-        if requestType == "friend":
-            q_email = request.args.get("email", default=None)
-            
-            if q_email:
-                q_user = get_user(q_email)
-            else:
-                return make_response(jsonify({'status': 'failed'}), 400)
-            
-            visibility = getVisibility(user, q_user)
-            if visibility == 'friends' or visibility == 'self':
-                return make_response(jsonify({'status': 'conflict'}), 409)
-            
-            newRequest = Requests.createDocument({"requestor": user['_id'],
-                                                  "requested": q_user['id'],
-                                                  "created_date": int(time.time()),
-                                                  "type": "friend"})
-            newRequest.save()
-            responseData = jsonify({'status': 'ok'})
-            return make_response(responseData, 201)
-        else:
-            responseData = jsonify({'status': 'type not supported'})
-            return make_response(responseData, 400)
-    else:
-        responseData = jsonify({'status': 'method not supported'})
-        return make_response(responseData, 400)
-
-#
-# Need to add delete method
-# Need to update POST method.  When friend option is given a friend request
-# should be created.
-# Need a PUT method that updates a friend request (confirms or deletes)
-@apiView.route('/v1/friends', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def v1_friends():
-    app.logger.debug("Reached v1_friends")
-    user = validate_firebase_token_return_user(request)
-
-    if user is None or user == 'expired':
-        return make_response(jsonify({'status': 'failed'}), 401)
-
-    q_email = request.args.get("email", default=None)
-    q_friend = request.args.get("friend", default=False)
-
-    if q_email:
-        q_user = get_user(q_email)
-    else:
-        return make_response(jsonify({'status': 'failed'}), 400)
-
-    if request.method == "GET":
-        visibility = getVisibility(user, q_user)
-        if visibility == 'friends' or visibility == 'self':
-            limit = int(request.args.get("limit", default=10))
-            page = int(request.args.get("page", default=1))
-            data = listFriends(user=q_user, limit=limit, page=page)
-            return make_response(jsonify(data), 200)
-        else:
-            responseData = jsonify({'status': 'unauthorized'})
-            return make_response(responseData, 401)
-    elif request.method == "POST":
-        #newFollower = addFollowers(follower=user, following=q_user)
-
-        #if q_friend == 'true':
-            #newFriend = addFollowers(follower=q_user, following=user)
-        
-
-        return make_response(jsonify({'status': 'ok'}), 200)
-    elif request.method == "PUT":
-        return make_response(jsonify({'status': 'ok'}), 200)
-    elif request.method == "DELETE":
-        return make_response(jsonify({'status': 'ok'}), 200)
-    else:
-        return make_response(jsonify({'status': 'ok'}), 200)
-
-
-#
 # Need a way to NOT hard code the image bucket
 # Need a put method to add/remove tags
 @apiView.route('/v1/images', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def v1_images():
-    global Images
-
     if request.method == "GET":
         return "images"
     elif request.method == "POST":
         app.logger.debug("Reached POST in v1_images")
         user = validate_firebase_token_return_user(request)
         if user and user != 'expired':
-            #bucket = 'onestoop-ussouth'
-            #bucket = 'mcontent'
             bucket = "onestoopimages01"
 
             if 'file' not in request.files:
@@ -731,22 +371,19 @@ def v1_images():
                 blob = imgBlob['blob']
 
                 if key:
-                    newImage = Images.createDocument()
-                    data = {'user_id': user['_id'],
+                    #newImage = Images.createDocument()
+                    data = {'user_id': user['uid'],
                             'created_date': int(datetime.utcnow().timestamp()),
                             'bucket': bucket,
                             'key': key,
                             'tags': None}
-        
-                    for k,v in data.items():
-                      newImage[k] = v
-        
-                    newImage.save()
-        
-                    #url = botoSession.generate_presigned_url(ClientMethod="get_object",
-                                                             #Params={'Bucket': bucket,
-                                                                    #'Key': key},
-                                                             #ExpiresIn=86400)
+
+                    #for k,v in data.items():
+                      #newImage[k] = v
+
+                    newImageObj = DB.collection(u'Images').document().set(data)
+
+                    #newImage.save()
 
                     url = blob.generate_signed_url(
                         version="v4",
@@ -757,7 +394,7 @@ def v1_images():
                     )
                     imagePath = url
                     responseData = jsonify({'status': 'success',
-                                            'imageID': newImage._key,
+                                            'imageID': newImageObj.id,
                                             'url': imagePath
                                             }
                                            )
@@ -779,35 +416,24 @@ def v1_images():
         user = validate_firebase_token_return_user(request)
         if user and user != 'expired':
             app.logger.debug("got user")
-            #fileName = request.args.get("fileName", default=None)
-            #app.logger.debug("filename")
-            #app.logger.debug(fileName)
-            #if fileName is None:
-                #responseData = jsonify({'status': 'missing fileName param'})
-                #return make_response(responseData, 400)
 
             key = request.args.get("key", default=None)
             if key is None:
                 responseData = jsonify({'status': 'missing key param'})
                 return make_response(responseData, 400)
-            #key = fileName.split('.')
+
             app.logger.debug("key")
             app.logger.debug(key)
-            #image = ImageObj(image_uid=key[0]).get()
+
             try:
-                image = Images[key]
-                post = Posts.fetchFirstExample({"_key": key, "author_id": user["_id"]})
+                #image = Images[key]
+                imageObj = DB.collection(u'Images').document(key).get()
+                image = imageObj.to_dict()
+                #post = Posts.fetchFirstExample({"_key": key, "author_id": user["uid"]})
             except Exception:
                 responseData = jsonify({'status': 'image not found'})
                 return make_response(responseData, 404)
-            #post_uid = request.args.get("postID", default=None)
-            #postUidSplit = post_uid.split('/')
-            
-            #try:
-                #p =  Posts[postUidSplit[1]].getStore()
-            #except Exception:
-                #p = None
-                #return make_response(jsonify({'status': 'Not Found'}), 404)
+
             app.logger.debug("image")
             app.logger.debug(image)
             if image is None:
@@ -816,9 +442,9 @@ def v1_images():
                 return make_response(responseData, 404)
 
             app.logger.debug("trying to delete from cos")
-            d = delete_file_from_cos(image.bucket, image.key)
+            d = delete_file_from_cos(image['bucket'], image['key'])
             if d:
-                image.delete()
+                imageObj.delete()
                 return make_response(jsonify({'status': 'success'}), 200)
             else:
                 return make_response(jsonify({'status': 'failed'}), 400)
@@ -828,306 +454,9 @@ def v1_images():
             return make_response(jsonify({'status': 'failed'}), 401)
 
 
-#
-# Need a way to NOT hard code the image bucket
-# Need to support tags
-@apiView.route('/v1/posts', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def v1_posts():
-    global Posts
-    if request.method == "GET":
-        app.logger.debug("Reached GET in v1_post")
-        user = validate_firebase_token_return_user(request)
-        if user and user != 'expired':
-            post_uid = request.args.get("postID", default=None)
-            postUidSplit = post_uid.split('/')
-            
-            try:
-                p =  Posts[postUidSplit[1]].getStore()
-            except Exception:
-                p = None
-                return make_response(jsonify({'status': 'Not Found'}), 404)
-            
-            q_user = get_user_by_uuid(p['users_uid'])
-            visibility = getVisibility(user, q_user)
-            if visibility == "friends" or visibility == "self":
-                post = p
-            elif visibility == "following" and p.visibility == "followers" or p.visibility == "public":
-                post = p
-            elif p.visibility == "public":
-                post = p
-            else:
-                post = {}
-            
-            return make_response(jsonify(post), 200)
-        elif user == 'expired':
-            return make_response(jsonify({'status': 'expired'}), 401)
-        else:
-            return make_response(jsonify({'status': 'failed'}), 401)
-    elif request.method == "POST":
-        app.logger.debug("Reached POST in v1_post")
-        user = validate_firebase_token_return_user(request)
-
-        if user and user != 'expired':
-            app.logger.debug("decoded worked")
-            try:
-                postJSON = request.get_json()
-                app.logger.debug(postJSON)
-                data = postJSON['post']
-            except Exception:
-                return make_response(jsonify({'status': 'fail'}), 400)
-
-            images = postJSON.get('images')
-            if images is None:
-                images = []
-            else:
-                imagesDict = []
-                images_uids = []
-                for i in images:
-                    uid = i['key'].split('.')
-                    imagesDict.append({'bucket': i['bucket'], 'key': i['key'], 'image_uid': uid[0]})
-                    images_uids.append(uid[0])
-            app.logger.debug(images)
-            visibility = postJSON.get('visibility')
-            if visibility is None:
-                visibility = 'friends'
-
-            comments = []
-            comments_uids = []
-
-            try:
-                newPost = Posts.createDocument({"created_date": int(time.time()),
-                                                "body": data,
-                                                "author_id": user['_id'],
-                                                "images": imagesDict,
-                                                "comments": comments,
-                                                "visibility": visibility})
-                newPost.save()
-            except Exception:
-                return make_response(jsonify({'status': 'failed'}), 400)
-
-            app.logger.debug('newPost')
-            app.logger.debug(newPost)
-            return make_response(jsonify(newPost.getStore()), 201)
-        elif user == 'expired':
-            return make_response(jsonify({'status': 'expired'}), 401)
-        else:
-            return make_response(jsonify({'status': 'failed'}), 401)
-    elif request.method == "PUT":
-        app.logger.debug("Reached PUT in v1_post")
-        user = validate_firebase_token_return_user(request)
-
-        if user and user != 'expired':
-            postID = request.args.get("postID", default=None)
-            if postID is None:
-                responseData = jsonify({'status': 'missing arg postID'})
-                return make_response(responseData, 400)
-
-            postUidSplit = postID.split('/')
-            
-            try:
-                post =  Posts[postUidSplit[1]]
-            except Exception:
-                post = None
-                return make_response(jsonify({'status': 'Not Found'}), 404)
-
-            if post is None:
-                responseData = jsonify({'status': 'not found'})
-                return make_response(responseData, 404)
-
-            reaction = request.args.get("reaction", default=None)
-            if reaction:
-                try:
-                    reactionData = request.get_json()
-                except Exception:
-                    return make_response(jsonify({'status': 'fail'}), 400)
-                
-                if 'reactions' not in post.getStore().keys():
-                    post['reactions'] = []
-
-                post['reactions'].append({'reactor': user['_id'], 'type': reactionData['type']})
-                try:
-                    post.save()
-                except Exception:
-                    return make_response(jsonify({'status': 'fail'}), 400)
-                return make_response(jsonify(post.getStore()), 200)
-
-            if post['author_id'] != user['_id']:
-                responseData = jsonify({'status': 'unauthorized'})
-                return make_response(responseData, 401)
-
-            try:
-                postJSON = request.get_json()
-                app.logger.debug('inbound JSON')
-                app.logger.debug(postJSON)
-                data = postJSON['post']
-            except Exception:
-                return make_response(jsonify({'status': 'fail'}), 400)
-
-            post['body'] = data
-            post['visibility'] = postJSON['visibility']
-
-            newImages = postJSON.get('newImages')
-            if newImages is None:
-                newImages = []
-
-            removeImages = postJSON.get('removeImages')
-            if removeImages is None:
-                removeImages = []
-
-            # setup images
-            images = post['images']
-            newImagesList = []
-            #for img in removeImages:
-                #uid = img.split('.')
-                #try:
-                    #post.images_uids.remove(uuid.UUID(uid[0]))
-                #except Exception:
-                    #pass
-
-                #tmp = [i for i in images if not (i['key'] == img)]
-                #images = tmp
-
-            #for img in newImages:
-                #images.append()
-                #uid = img.split('.')
-                #images.append({'bucket': 'onestoop-ussouth', 'key': img, 'image_uid': uid[0]})
-                #post.images_uids.append(uid[0])
-
-            #post.images = images
-            #post.publish()
-            post.save()
-
-            app.logger.debug(post.getStore())
-            return make_response(jsonify(post.getStore()), 200)
-        elif user == 'expired':
-            return make_response(jsonify({'status': 'expired'}), 401)
-        else:
-            return make_response(jsonify({'status': 'failed'}), 401)
-    elif request.method == "DELETE":
-        app.logger.debug("Reached DELETE in v1_post")
-        user = validate_firebase_token_return_user(request)
-
-        if user and user != 'expired':
-            app.logger.debug("decoded worked")
-            postID = request.args.get("postID", default=None)
-
-            if postID is None:
-                responseData = jsonify({'status': 'missing arg postID'})
-                return make_response(responseData, 400)
-            else:
-                post = Posts.fetchFirstExample({"_id": postID, "author_id": user["_id"]})
-                app.logger.debug("this is post")
-                app.logger.debug(post)
-
-                if post is None:
-                    return make_response(jsonify({'status': 'not found'}), 400)
-
-                if post[0]['author_id'] != user['_id']:
-                    return make_response(jsonify({'status': 'failed'}), 401)
-                else:
-                    comments = Comments.fetchByExample({"post_id": post[0]['_id']}, 1)
-                    for comment in comments:
-                        app.logger.debug("deleted comment " + comment["_id"])
-                        comment.delete()
-
-                    post[0].delete()
-                    return make_response(jsonify({'status': 'success'}), 200)
-
-        elif user == 'expired':
-            return make_response(jsonify({'status': 'expired'}), 401)
-        else:
-            return make_response(jsonify({'status': 'failed'}), 401)
-
-
-# Need a tag search
-@apiView.route('/v1/search', methods=['GET'])
-def v1_search():
-    global db
-    app.logger.debug("Reached search in v1_search")
-    user = validate_firebase_token_return_user(request)
-
-    q_email = request.args.get("email", default=None)
-    q_name = request.args.get("name", default=None)
-    q = request.args.get("q", default=None)
-    limit = request.args.get("limit", default=10)
-
-    if user and user != 'expired':
-        app.logger.debug("user not expired")
-        if q_email:
-            app.logger.debug("Starting email search")
-            aql = 'FOR u in Users FILTER u.email LIKE "' + q_email + '%" LIMIT ' + str(limit) + ' return u '
-            q = db.AQLQuery(aql, rawResults=True, batchSize=100)
-            options = []
-            for i in q:
-                options.append(i)
-            app.logger.debug("here are your options!!!!!!!!!!!!")
-            app.logger.debug(options)
-        elif q_name:
-            app.logger.debug("Starting name search")
-            aql = 'FOR u in Users FILTER u.name LIKE "' + q_name + '%" LIMIT ' + str(limit) + ' return u '
-            q = db.AQLQuery(aql, rawResults=True, batchSize=100)
-            options = []
-            for i in q:
-                options.append(i)
-            app.logger.debug("here are your options!!!!!!!!!!!!")
-            app.logger.debug(options)
-        elif q:
-            app.logger.debug("Starting q search")
-            options = []
-            #if len(options) < limit:
-            aql = 'FOR u in Users FILTER u.email LIKE "' + q + '%" OR u.name LIKE "' + q + '%" LIMIT ' + str(limit) + ' return u '
-            q = db.AQLQuery(aql, rawResults=True, batchSize=100)
-            app.logger.debug('here is q!!!!!!!!!!')
-            app.logger.debug(q)
-            #for i in q:
-            for i in range(len(q)):
-                options.append(q[i])
-            app.logger.debug("here are your options!!!!!!!!!!!!")
-            app.logger.debug(options)
-        else:
-            options = []
-        app.logger.debug("here is json data")
-        app.logger.debug(jsonify({'opitons': options}))
-        return make_response(jsonify({'opitons': options}), 200)
-    elif user == 'expired':
-            return make_response(jsonify({'status': 'expired'}), 401)
-    else:
-        return make_response(jsonify({'status': 'failed'}), 401)
-
-
 @apiView.route('/v1/status', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def v1_status():
     return make_response(jsonify({'status': 'up'}), 200)
-
-
-@apiView.route('/v1/timeline', methods=['GET'])
-def v1_timeline():
-    global db
-    if request.method == "GET":
-        app.logger.debug("Reached GET in v1_timeline")
-        user = validate_firebase_token_return_user(request)
-        if user and user != 'expired':
-            start_time = request.args.get("startTime", default=1546300800)
-            end_time = int(request.args.get("endTime", default=int(datetime.utcnow().timestamp())))
-            limit = int(request.args.get("limit", default=10))
-            q_userString = request.args.get("email", default=None)
-            q_user = get_user(q_userString)
-
-            visibility = getVisibility(user, q_user)
-
-            posts = TimelineJSON(user_id=q_user['_id'],
-                             visibility=visibility,
-                             start_time=start_time,
-                             end_time=end_time,
-                             limit=limit,
-                             db=db
-                             )
-
-            return make_response(posts, 200)
-        else:
-            return make_response(jsonify({'status': 'expired'}), 401)
-    else:
-        return make_response(jsonify({'status': 'not supported'}), 200)
 
 
 #
@@ -1135,8 +464,6 @@ def v1_timeline():
 # Need a put method to update user
 @apiView.route('/v1/users', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def v1_users():
-    global Users
-
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_user")
         app.logger.debug(request.headers)
@@ -1147,8 +474,8 @@ def v1_users():
 
         if displayName and q_id:
             user = get_user_by_id(q_id)
-            if user and 'displayName' in user.getStore().keys():
-                responseData = {'status': 'ok', 'user': {"displayName": user.displayName}}
+            if user and 'displayName' in user.to_dict().keys():
+                responseData = {'status': 'ok', 'user': {"displayName": user['displayName']}}
                 app.logger.debug(responseData)
                 return make_response(jsonify(responseData), 200)
             elif user:
@@ -1159,13 +486,15 @@ def v1_users():
                 responseData = {'status': 'not found', 'user': {"displayName": ''}}
                 app.logger.debug(responseData)
                 return make_response(jsonify(responseData), 404)
-                
-        user = validate_firebase_token_return_user(request)
+
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
         if user and user != 'expired':
             if q_email is None:
                 return make_response(jsonify({'status': 'not found'}), 404)
             else:
-                q_user = get_user(q_email)
+                q_userObj = get_user(q_email)
+                q_user = q_userObj.to_dict()
                 if q_user:
                     visibility = getVisibility(user, q_user)
                     responseData = format_user_response(q_user, visibility)
@@ -1196,9 +525,9 @@ def v1_users():
             email = decoded_token['email']
             uid = decoded_token['uid']
             name = request.args.get('name') or None
-            
+
             existingUser = get_user(email)
-            
+
             if existingUser:
                 return make_response(jsonify({'status': 'ok'}), 200)
             else:
@@ -1222,127 +551,127 @@ def v1_users_id(userId):
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_users_userId")
         user = validate_firebase_token_return_user(request)
-        
+
         qUser = get_user_by_id(userId)
         visibility = getVisibility(user, qUser)
         responseData = format_user_response(qUser, visibility)
         return make_response(jsonify(responseData), 200)
-        
+
 
 ###########################
 def loadRecipe(r, recipes):
     app.logger.debug("doign loadRecipe")
     images = []
-    #for iNum, imageID in enumerate(r['images']):
     for iNum, imageObj in enumerate(r['images']):
         imageID = imageObj['id']
-        try:
-            image = Images[imageID]
-            image = get_image_url(image)
-            #images.append(image)
-            images.append({"image": image, "position": int(imageObj['position'])})
-            #r['images'] = images
-            r['images'] = sorted(images, key = lambda i: i['position'])
-            app.logger.debug('this is images')
-            app.logger.debug(images)
-        except Exception as e:
-            app.logger.debug(e)
-        
-    rId = r['_id'].split('/')
-    r['_id'] = rId[1]
+        #try:
+        #image = Images[imageID]
+        imageDoc = DB.collection(u'Images').document(imageID).get()
+        image = imageDoc.to_dict()
+        image['uid'] = imageDoc.id
+        image = get_image_url(image)
+        #images.append(image)
+        images.append({"image": image, "position": int(imageObj['position'])})
+        #r['images'] = images
+        r['images'] = sorted(images, key = lambda i: i['position'])
+        app.logger.debug('this is images')
+        app.logger.debug(images)
+        #except Exception as e:
+            #app.logger.debug(e)
+
+    #rId = r['_id'].split('/')
+    #r['_id'] = rId[1]
     recipes['recipes'].append(r)
     return recipes
 
-    
+
 @apiView.route('/v1/recipes', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def v1_recipes():
-    global Recipes
-    global db
-    global cookingDB
-    global Images
+    #global Recipes
+    #global db
+    #global cookingDB
+    #global Images
 
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_recipes")
         app.logger.debug(request.url)
         app.logger.debug(request.headers)
 
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
 
         authorEmail = request.args.get("author", default=None)
+
         recipeType = request.args.get("recipeType", default=None)
-        term = request.args.get("term", default=None)
+        if recipeType:
+            recipeType = recipeType.lower()
 
         limit = request.args.get("limit", default=10)
-        nextOffset = request.args.get("nextOffset", default=0)
-        
+        limit = int(limit)
+        #nextOffset = request.args.get("nextOffset", default=0)
+        #nextOffset = int(nextOffset)
+        nextId = request.args.get("nextId", default=None)
+
         if authorEmail:
-            q_user = get_user(authorEmail)
+            q_userObj = get_user(authorEmail)
+            q_user = q_userObj.to_dict()
         else:
             q_user = None
-        
+
         if int(limit) > 100:
             limit = 100
-        
-        
-        app.logger.debug("building aql")
-        aql = 'FOR r in Recipes FILTER '
-        
-        if user == None or user == 'expired':
-            aql += 'r.visibility != "private" FILTER '
 
+        fRecipes = DB.collection(u'Recipes')
+        query = fRecipes.where(u'created_date', u'>', 1).order_by(u'created_date')
         if q_user:
-            app.logger.debug("doing recipeId or q_user")
-            aql += 'r.authorId == "' + q_user['_id'] + '"'
-    
-        if term:
-            term = term.lower()
-            aql += 'LOWER(r.title) LIKE "%' + term \
-                + '%" OR LOWER(r.description) LIKE "%' + term \
-                + '%" OR LOWER(r.ingredients[*].item) LIKE "%' + term \
-                + '%" OR LOWER(r.recipeType) LIKE "%' + term \
-                + '%" OR LOWER(r.cusine) LIKE "%' + term + '%" '
+            app.logger.debug("got q_user")
+            query = query.where(u'authorId', u'==', q_user['uid'])
 
-        elif recipeType:
-            recipeType = recipeType.lower()
-            aql += 'r.recipeType == "' + recipeType + '" '
-            
-        aql += 'sort r.created_date DESC LIMIT ' + str(nextOffset) \
-            + ', ' + str(limit) + ' RETURN r'
-        
-        app.logger.debug("this is aql")
-        app.logger.debug(aql)
-        
-        try:
-            r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
-            q = r.response['result']
-        except:
-            q = []
-    
-        app.logger.debug("this is q")
-        app.logger.debug(q)
+        if user == None or user == 'expired':
+            query = query.where(u'visibility', u'==', u'public')
+        elif q_user == None:
+            query = query.where(u'visibility', u'==', u'public')
+        elif q_user['uid'] != user['uid']:
+            query = query.where(u'visibility', u'==', u'public')
+        elif q_user['uid'] != user['uid']:
+            pass
+        else:
+            query = query.where(u'visibility', u'==', u'public')
+
+        if recipeType:
+            app.logger.debug("got recipeType")
+            query = query.where(u'recipeType', u'==', recipeType)
+
+        if nextId:
+            app.logger.debug("got nextId")
+            nextDoc = fRecipes.document(nextId)
+            snapShot = nextDoc.get()
+            query = query.start_at(snapShot)\
+                .limit(limit + 1)
+        else:
+            app.logger.debug("doing else")
+            query = query.limit(limit + 1)
+
+        docs = query.stream()
         recipes = {"recipes": []}
-        
-        if len(q) < int(limit):
-            recipes['nextOffset'] = int(nextOffset)
+        for doc in docs:
+            app.logger.debug(doc.id)
+            d = doc.to_dict()
+            d['_id'] = doc.id
+            d['uid'] = doc.id
+            recipes = loadRecipe(d, recipes)
+
+        if len(recipes['recipes']) <= limit:
+            app.logger.debug("no more results")
             recipes['moreResults'] = False
         else:
-            recipes['nextOffset'] = int(nextOffset) + int(limit)
+            app.logger.debug("must be more")
+            lastDoc = recipes['recipes'].pop()
+            recipes['nextId'] = lastDoc['_id']
             recipes['moreResults'] = True
-            
-        for rNum, r in enumerate(q):
-            
-            if r['visibility'].lower() == 'private':
-                if user == None or user == 'expired':
-                  pass
-                elif r['authorId'] != user['_id']:
-                  pass
-                else:
-                    recipes = loadRecipe(r, recipes)
-            else:
-                recipes = loadRecipe(r, recipes)
-                    
-        
-        app.logger.debug(recipes)
+
+        app.logger.debug("from firestore")
+        #app.logger.debug(recipes)
         return make_response(jsonify(recipes), 200)
     elif request.method == "POST":
         app.logger.debug("Reached POST in v1_recipes")
@@ -1355,7 +684,7 @@ def v1_recipes():
                 app.logger.debug(data)
             except Exception:
                 return make_response(jsonify({'status': 'fail'}), 400)
-            
+
             schema = {
                 "type": "object",
                 "properties": {
@@ -1374,14 +703,14 @@ def v1_recipes():
                     "images": {"type": "array"}
                 }
             }
-           
+
             try:
                 validate(instance=data, schema=schema)
             except Exception:
                 app.logger.debug("JSON validating failed")
                 return make_response(jsonify({'status': 'bad JSON'}), 400)
-            
-            data['authorId'] = user['_id']
+
+            data['authorId'] = user['uid']
             data['bookmarked'] = 0
             data['rating'] = 0
             data['ratingCount'] = 0
@@ -1391,20 +720,23 @@ def v1_recipes():
             data['recipeType'] = data['recipeType'].lower()
             data['recipeSubType'] = data['recipeSubType'].lower()
             data["created_date"] = int(time.time())
-            
+
             newImages = []
             for i, image in enumerate(data['images']):
                 newImages.append({"id": image, "position": i})
             data['images'] = newImages
-            
-            try:
-                newRecipe = Recipes.createDocument(data)
-                newRecipe.save()
-            except Exception:
-                return make_response(jsonify({'status': 'fail'}), 400)
 
-            return make_response(jsonify({'status': 'ok'}), 200)          
-            
+            #try:
+                #newRecipe = Recipes.createDocument(data)
+                #newRecipe.save()
+            #try:
+            doc = DB.collection(u'Recipes').document()
+            doc.set(data)
+            #except Exception:
+                #return make_response(jsonify({'status': 'fail'}), 400)
+
+            return make_response(jsonify({'status': 'ok'}), 200)
+
         elif user == 'expired':
             return make_response(jsonify({'status': 'expired'}), 401)
         else:
@@ -1416,63 +748,98 @@ def v1_recipes():
     else:
         return
 
+@apiView.route('/v1/recipes/search', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def v1_recipes_search():
+    if request.method == "GET":
+        user = validate_firebase_token_return_user(request)
+
+        q = request.args.get("q", default=None)
+
+        if q == None:
+            return make_response(jsonify({'status': 'q is required'}), 400)
+
+
+        hits = searchIndex.search(q, {'filters': "visibility:'public'"})
+
+        recipes = {"recipes": []}
+        for doc in hits['hits']:
+            app.logger.debug(doc['objectID'])
+            #d = doc.to_dict()
+            doc['_id'] = doc['objectID']
+            doc['uid'] = doc['objectID']
+            recipes = loadRecipe(doc, recipes)
+
+        recipes['moreResults'] = False
+
+        return make_response(jsonify(recipes), 200)
+
+
 @apiView.route('/v1/recipes/<recipeId>', methods=['GET', 'PATCH', 'POST', 'PUT', 'DELETE'])
 def v1_recipes_id(recipeId):
-    global Recipes
-    global db
-    global cookingDB
-    global Images
+    #global Recipes
+    #global db
+    #global cookingDB
+    #global Images
 
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_recipes_id")
         app.logger.debug(request.headers)
         user = validate_firebase_token_return_user(request)
-        
+
         if '/' in recipeId:
             r = recipeId.split('/')
             recipeId = r[1]
-        
+
+        #try:
+            #recipe = Recipes[recipeId]
         try:
-            recipe = Recipes[recipeId]
+            docRef = DB.collection(u'Recipes').document(recipeId)
+            doc = docRef.get()
+            recipe = doc.to_dict()
         except Exception:
             return make_response(jsonify({'status': 'not found'}), 404)
-        
+
         if recipe['visibility'].lower() == 'private':
             if user == None or user == 'expired':
                 app.logger.debug("this should be private")
                 return make_response(jsonify({'status': 'not found'}), 401)
-            if user['_id'] != recipe['authorId']:
+            if user['uid'] != recipe['authorId']:
                 app.logger.debug("this should be private")
                 return make_response(jsonify({'status': 'not found'}), 401)
-        
+
         recipes = {"recipes": []}
-        recipes = loadRecipe(recipe.getStore(), recipes)
+        #recipes = loadRecipe(recipe.getStore(), recipes)
+        recipes = loadRecipe(recipe, recipes)
         app.logger.debug(recipes)
-        
+
         return make_response(jsonify(recipes),200)
     elif request.method == "PATCH":
         app.logger.debug("Reached PATCH in v1_recipes_id")
         app.logger.debug(request.headers)
         user = validate_firebase_token_return_user(request)
-        
+
         if '/' in recipeId:
             r = recipeId.split('/')
             recipeId = r[1]
-        
+
+        #try:
+            #recipe = Recipes[recipeId]
         try:
-            recipe = Recipes[recipeId]
+            docRef = DB.collection(u'Recipes').document(recipeId)
+            doc = docRef.get()
+            recipe = doc.to_dict()
         except Exception:
             return make_response(jsonify({'status': 'not found'}), 404)
-        
-        if user['_id'] != recipe.authorId:
+
+        if user['uid'] != recipe['authorId']:
             return make_response(jsonify({'status': 'Unauthorized'}), 401)
-        
+
         try:
             data = request.get_json()
             app.logger.debug(data)
         except Exception:
             return make_response(jsonify({'status': 'fail'}), 400)
-        
+
         goodKeys = ["cookTime",
                     "cusine",
                     "description",
@@ -1489,22 +856,24 @@ def v1_recipes_id(recipeId):
                     "title",
                     "visibility"
                     ]
-        
+
         for key, value in data.items():
             if key not in goodKeys:
                 continue
-            
+
             if key == "images":
                 pass
             else:
                 recipe[key] = value
-        
+
+        #try:
+            #recipe.save()
         try:
-            recipe.save()
+            DB.collection(u'Recipes').document(recipeId).set(recipe)
         except Exception:
             return make_response(jsonify({'status': 'database error'}), 500)
-        
-        return make_response(jsonify({'status': 'ok'}), 200) 
+
+        return make_response(jsonify({'status': 'ok'}), 200)
 
     elif request.method == "POST":
         return
@@ -1514,85 +883,127 @@ def v1_recipes_id(recipeId):
         app.logger.debug("Reached DELETE in v1_recipes_id")
         app.logger.debug(request.headers)
         user = validate_firebase_token_return_user(request)
-        
+
         if '/' in recipeId:
             r = recipeId.split('/')
             recipeId = r[1]
-        
+
+        #try:
+            #recipe = Recipes[recipeId]
         try:
-            recipe = Recipes[recipeId]
+            docRef = DB.collection(u'Recipes').document(recipeId)
+            recipeObj = docRef.get()
+            recipe = recipeObj.to_dict()
         except Exception:
             return make_response(jsonify({'status': 'not found'}), 404)
-        
-        if user['_id'] != recipe.authorId:
+
+        if user['uid'] != recipe['authorId']:
             return make_response(jsonify({'status': 'Unauthorized'}), 401)
-        
+
         # delete the reviews
+        #try:
+            #aql = 'FOR r in Reviews FILTER r.recipeId == "' + recipeId + '" ' \
+                #' REMOVE r in Reviews'
+            #r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
         try:
-            aql = 'FOR r in Reviews FILTER r.recipeId == "' + recipeId + '" ' \
-                ' REMOVE r in Reviews'
-            r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
+            fRecipes = DB.collection(u'Reviews')
+            query = fRecipes.where(u'recipeId', u'==', recipeId)
+            docs = query.stream()
+            for doc in docs:
+                doc.delete()
         except Exception:
             return make_response(jsonify({'status': 'Error'}), 500)
-        
+
         # delete the images
-        for image in recipe.images:
+        for image in recipe['images']:
             deleteImage(image)
-        
+
         # delete recipe
         try:
-            recipe.delete()
+            recipeObj.delete()
         except Exception:
             return make_response(jsonify({'status': 'Error'}), 500)
-        
+
         return make_response(jsonify({'status': 'ok'}), 200)
     else:
         return
 
 @apiView.route('/v1/recipes/<recipeId>/reviews', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def v1_recipes_id_reviews(recipeId):
-    global Recipes
-    global db
-    global cookingDB
-    global Reviews
-    global Users
-    
+    #global Recipes
+    #global db
+    #global cookingDB
+    #global Reviews
+    #global Users
+
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_recipes_id_reviews")
-        
+
         limit = request.args.get("limit", default=10)
-        offset = request.args.get("offset", default=0)
-        
-        aql = 'FOR r in Reviews FILTER r.recipeId == "' + recipeId + '" ' \
-            ' sort r.created_date DESC LIMIT ' + str(offset) \
-            + ', ' + str(limit) + ' RETURN r'
-        
-        aqlCount = 'FOR doc in Reviews FILTER doc.recipeId == "' + recipeId + '" COLLECT WITH COUNT INTO length RETURN length'
+        limit = int(limit)
+        #offset = request.args.get("offset", default=0)
+        nextId = request.args.get("nextId", default=None)
 
-        app.logger.debug(aql)
-        try:
-            r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
-            c = cookingDB.AQLQuery(aqlCount, rawResults=True, batchSize=100)
-            q = r.response['result']
-            count = c.response['result'][0]
-        except:
-            q = []
-            
-        reviews = {'reviews': q}
-        reviews['total'] = count
+        #aql = 'FOR r in Reviews FILTER r.recipeId == "' + recipeId + '" ' \
+            #' sort r.created_date DESC LIMIT ' + str(offset) \
+            #+ ', ' + str(limit) + ' RETURN r'
 
-        if len(q) < int(limit):
-            reviews['nextOffset'] = int(offset)
+        #aqlCount = 'FOR doc in Reviews FILTER doc.recipeId == "' + recipeId + '" COLLECT WITH COUNT INTO length RETURN length'
+
+        #app.logger.debug(aql)
+        #try:
+            #r = cookingDB.AQLQuery(aql, rawResults=True, batchSize=100)
+            #c = cookingDB.AQLQuery(aqlCount, rawResults=True, batchSize=100)
+            #q = r.response['result']
+            #count = c.response['result'][0]
+        #except:
+            #q = []
+
+        fReviews = DB.collection(u'Reviews')
+        countObj = fReviews.where(u'recipeId', u'==', recipeId).get()
+        count = len(countObj)
+        query = fReviews.where(u'created_date', u'>', 1).order_by(u'created_date')
+        query = query.where(u'recipeId', u'==', recipeId)
+
+        if nextId:
+            app.logger.debug("got nextId")
+            nextDoc = fReviews.document(nextId)
+            snapShot = nextDoc.get()
+            query = query.start_at(snapShot)\
+                .limit(limit + 1)
+        else:
+            app.logger.debug("doing else")
+            query = query.limit(limit + 1)
+
+        reviewsList = query.get()
+        reviews = {"reviews": reviewsList}
+        if len(reviews['reviews']) <= limit:
+            app.logger.debug("no more results")
             reviews['moreResults'] = False
         else:
-            reviews['nextOffset'] = int(offset) + int(limit)
+            app.logger.debug("must be more")
+            lastDoc = reviews['reviews'].pop()
+            reviews['nextId'] = lastDoc['uid']
             reviews['moreResults'] = True
-            
+
+        #reviews = {'reviews': q}
+        reviews['total'] = count
+
+        #if len(q) < int(limit):
+            #reviews['nextOffset'] = int(offset)
+            #reviews['moreResults'] = False
+        #else:
+            #reviews['nextOffset'] = int(offset) + int(limit)
+            #reviews['moreResults'] = True
+
         for i, review in enumerate(reviews['reviews']):
-            app.logger.debug(review['authorId'])
-            u = Users[review['authorId'].split('/')[1]]
-            reviews['reviews'][i]['authorId'] = u.displayName
-        
+            #app.logger.debug(review['authorId'])
+            #u = Users[review['authorId'].split('/')[1]]
+            #reviews['reviews'][i]['authorId'] = u.displayName
+            uObj = DB.collection(u'Users').document(review['authorId']).get()
+            uDict = uObj.to_dict()
+            reviews['reviews'][i]['authorId'] = uDict['name']
+
         app.logger.debug(reviews)
         return make_response(jsonify(reviews), 200)
     elif request.method == "POST":
@@ -1606,12 +1017,12 @@ def v1_recipes_id_reviews(recipeId):
                 app.logger.debug(data)
             except Exception:
                 return make_response(jsonify({'status': 'fail'}), 400)
-            
+
         elif user == 'expired':
             return make_response(jsonify({'status': 'expired'}), 401)
         else:
             return make_response(jsonify({'status': 'failed'}), 401)
-        
+
         schema = {
             "type": "object",
             "properties": {
@@ -1620,50 +1031,72 @@ def v1_recipes_id_reviews(recipeId):
                 "score": {"type": "number"}
                 }
             }
-           
+
         try:
             validate(instance=data, schema=schema)
         except Exception:
             app.logger.debug("JSON validating failed")
             return make_response(jsonify({'status': 'bad JSON'}), 400)
-        
+
         if data['recommend'].lower() == 'true' or data['recommend'].lower() == 'yes':
             data['recommend'] = 'Yes'
         elif data['recommend'].lower() == 'false' or data['recommend'].lower() == 'no':
             data['recommend'] = 'No'
         else:
             data['recommend'] = None
-        
-        data['authorId'] = user['_id']
+
+        #data['authorId'] = user['_id']
+        data['authorId'] = user['uid']
         data["created_date"] = int(time.time())
         data["recipeId"] = recipeId
-        
+
+        #try:
+            #newReview = Reviews.createDocument(data)
+            #newReview.save()
         try:
-            newReview = Reviews.createDocument(data)
-            newReview.save()
+            newReview = DB.collection(u'Reviews').document()
+            newReview.set(data)
         except Exception:
             return make_response(jsonify({'status': 'fail'}), 400)
-        
+
         #update the recipe with Metadata
+        #try:
+            #aqlScore = 'FOR doc in Reviews FILTER doc.recipeId == "' + recipeId + '" COLLECT AGGREGATE score = AVG(doc.score) RETURN score'
+            #aqlCount = 'FOR doc in Reviews FILTER doc.recipeId == "' + recipeId + '" COLLECT WITH COUNT INTO length RETURN length'
+            #s = cookingDB.AQLQuery(aqlScore, rawResults=True)
+            #c = cookingDB.AQLQuery(aqlCount, rawResults=True)
+            #score = round(s.response['result'][0],2)
+            #count = c.response['result'][0]
+            #recipe = Recipes[recipeId]
+            #recipe['rating'] = score
+            #recipe['ratingCount'] = count
+            #recipe.save()
         try:
-            aqlScore = 'FOR doc in Reviews FILTER doc.recipeId == "' + recipeId + '" COLLECT AGGREGATE score = AVG(doc.score) RETURN score'
-            aqlCount = 'FOR doc in Reviews FILTER doc.recipeId == "' + recipeId + '" COLLECT WITH COUNT INTO length RETURN length'
-            s = cookingDB.AQLQuery(aqlScore, rawResults=True)
-            c = cookingDB.AQLQuery(aqlCount, rawResults=True)
-            score = round(s.response['result'][0],2)
-            count = c.response['result'][0]
-            recipe = Recipes[recipeId]
+            fReviews = DB.collection(u'Reviews')
+            reviewsObj = fReviews.where(u'recipeId', u'==', recipeId).get()
+            count = len(reviewsObj)
+            docRef = DB.collection(u'Recipes').document(recipeId)
+            doc = docRef.get()
+            recipe = doc.to_dict()
+            reviews = reviewsObj.to_dict()
+
+            score = 0
+            for review in reviews:
+                score += int(review['score'])
+
+            score = score/count
             recipe['rating'] = score
             recipe['ratingCount'] = count
-            recipe.save()
+
+            DB.collection(u'Recipes').document(recipeId).set(recipe)
         except Exception:
             pass
 
-        review = {"reviews": [newReview.getStore()]}
+        review = {"reviews": [newReview.to_dict()]}
         app.logger.debug(review)
         #try:
-        u = Users[review['reviews'][0]['authorId'].split('/')[1]]
-        review['reviews'][0]['authorId'] = u.displayName
+        #u = Users[review['reviews'][0]['authorId'].split('/')[1]]
+        #review['reviews'][0]['authorId'] = u.displayName
         #except:
             #pass
         return make_response(jsonify(review), 200)
@@ -1677,10 +1110,10 @@ def v1_recipes_id_reviews(recipeId):
 
 @apiView.route('/v1/recipes/<recipeId>/bookmarks', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def v1_recipes_id_bookmarks(recipeId):
-    global Recipes
-    global db
-    global cookingDB
-    global Users
+    #global Recipes
+    #global db
+    #global cookingDB
+    #global Users
 
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_recipes_id_bookmarks")
@@ -1696,7 +1129,7 @@ def v1_recipes_id_bookmarks(recipeId):
                 app.logger.debug(data)
             except Exception:
                 return make_response(jsonify({'status': 'fail'}), 400)
-            
+
             schema = {
                 "type": "object",
                 "properties": {
@@ -1704,7 +1137,7 @@ def v1_recipes_id_bookmarks(recipeId):
                     "bookmarked": {"type": "string"},
                     }
                 }
-            
+
             try:
                 validate(instance=data, schema=schema)
             except Exception:
@@ -1733,7 +1166,7 @@ def v1_recipeTypes():
     qtype = request.args.get("type", default="jim")
     app.logger.debug(request)
     app.logger.debug(qtype)
-    
+
     if qtype.lower() == "appetizers":
         types = {"types":
                      ["Appetizers - Other",
@@ -1913,4 +1346,4 @@ def v1_recipeTypes():
     else:
         types = {"types": ["other"]}
         return make_response(jsonify(types), 200)
-    
+

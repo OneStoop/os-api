@@ -4,6 +4,8 @@ from firebase_admin import credentials
 from flask_cors import CORS
 #import boto3
 from google.cloud import storage
+#from algoliasearch.search_client import SearchClient
+
 
 app = Flask(__name__)
 app.config.from_object('config')
@@ -39,6 +41,15 @@ app.config['CORS_HEADERS'] = 'Content-Type'
 
 gcsClient = storage.Client()
 #gcsBucket = client.get_bucket('onestoopimages01')
+
+from firebase_admin import firestore
+DB = firestore.client()
+
+#client = SearchClient.create(app.config['ALGOLIA_CONFIG']["appId"],
+                             #app.config['ALGOLIA_CONFIG']["searchKey"])
+#searchIndex = client.init_index(app.config['ALGOLIA_CONFIG']["index"])
+#searchIndex.set_settings({'attributesForFaceting': ['visibility']})
+
 
 
 if (app.debug):
