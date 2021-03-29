@@ -784,7 +784,8 @@ def v1_recipes_id(recipeId):
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_recipes_id")
         app.logger.debug(request.headers)
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
 
         if '/' in recipeId:
             r = recipeId.split('/')
@@ -816,7 +817,8 @@ def v1_recipes_id(recipeId):
     elif request.method == "PATCH":
         app.logger.debug("Reached PATCH in v1_recipes_id")
         app.logger.debug(request.headers)
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
 
         if '/' in recipeId:
             r = recipeId.split('/')
@@ -882,7 +884,8 @@ def v1_recipes_id(recipeId):
     elif request.method == "DELETE":
         app.logger.debug("Reached DELETE in v1_recipes_id")
         app.logger.debug(request.headers)
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
 
         if '/' in recipeId:
             r = recipeId.split('/')
@@ -910,8 +913,9 @@ def v1_recipes_id(recipeId):
             query = fRecipes.where(u'recipeId', u'==', recipeId)
             docs = query.stream()
             for doc in docs:
-                doc.delete()
+                DB.collection(u'Reviews').document(doc.id).delete()
         except Exception:
+            app.logger.debug("failed reviews delete")
             return make_response(jsonify({'status': 'Error'}), 500)
 
         # delete the images
@@ -920,8 +924,9 @@ def v1_recipes_id(recipeId):
 
         # delete recipe
         try:
-            recipeObj.delete()
+            DB.collection(u'Recipes').document(recipeId).delete()
         except Exception:
+            app.logger.debug("failed recipe delete")
             return make_response(jsonify({'status': 'Error'}), 500)
 
         return make_response(jsonify({'status': 'ok'}), 200)
