@@ -349,7 +349,11 @@ def v1_images():
     elif request.method == "POST":
         app.logger.debug("Reached POST in v1_images")
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
+
         if user and user != 'expired':
             bucket = "onestoopimages01"
 
@@ -416,7 +420,10 @@ def v1_images():
     elif request.method == "DELETE":
         app.logger.debug("Reached DELETE in v1_images")
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
 
         if user and user != 'expired':
             app.logger.debug("got user")
@@ -492,7 +499,11 @@ def v1_users():
                 return make_response(jsonify(responseData), 404)
 
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
+
         if user and user != 'expired':
             if q_email is None:
                 return make_response(jsonify({'status': 'not found'}), 404)
@@ -555,7 +566,10 @@ def v1_users_id(userId):
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_users_userId")
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
 
         qUser = get_user_by_id(userId)
         visibility = getVisibility(user, qUser)
@@ -603,7 +617,10 @@ def v1_recipes():
         app.logger.debug(request.headers)
 
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
 
         authorEmail = request.args.get("author", default=None)
 
@@ -689,7 +706,10 @@ def v1_recipes():
         app.logger.debug("Reached POST in v1_recipes")
         app.logger.debug(request.headers)
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
 
         if user and user != 'expired':
             try:
@@ -765,7 +785,10 @@ def v1_recipes():
 def v1_recipes_search():
     if request.method == "GET":
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
 
         q = request.args.get("q", default=None)
 
@@ -799,7 +822,10 @@ def v1_recipes_id(recipeId):
         app.logger.debug("Reached GET in v1_recipes_id")
         app.logger.debug(request.headers)
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
 
         if '/' in recipeId:
             r = recipeId.split('/')
@@ -832,7 +858,10 @@ def v1_recipes_id(recipeId):
         app.logger.debug("Reached PATCH in v1_recipes_id")
         app.logger.debug(request.headers)
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
 
         if '/' in recipeId:
             r = recipeId.split('/')
@@ -899,7 +928,10 @@ def v1_recipes_id(recipeId):
         app.logger.debug("Reached DELETE in v1_recipes_id")
         app.logger.debug(request.headers)
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
 
         if '/' in recipeId:
             r = recipeId.split('/')
@@ -1029,7 +1061,10 @@ def v1_recipes_id_reviews(recipeId):
         app.logger.debug("Reached POST in v1_recipes_id_reviews")
         app.logger.debug(request.headers)
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
 
         if user and user != 'expired':
             try:
@@ -1142,7 +1177,10 @@ def v1_recipes_id_bookmarks(recipeId):
         app.logger.debug("Reached POST in v1_recipes_id_bookmarks")
         app.logger.debug(request.headers)
         userObj = validate_firebase_token_return_user(request)
-        user = userObj.to_dict()
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
 
         if user and user != 'expired':
             try:
