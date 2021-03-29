@@ -348,7 +348,8 @@ def v1_images():
         return "images"
     elif request.method == "POST":
         app.logger.debug("Reached POST in v1_images")
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
         if user and user != 'expired':
             bucket = "onestoopimages01"
 
@@ -381,7 +382,8 @@ def v1_images():
                     #for k,v in data.items():
                       #newImage[k] = v
 
-                    newImageObj = DB.collection(u'Images').document().set(data)
+                    newImageObj = DB.collection(u'Images').document()
+                    newImageObj.set(data)
 
                     #newImage.save()
 
@@ -413,7 +415,9 @@ def v1_images():
         return "images"
     elif request.method == "DELETE":
         app.logger.debug("Reached DELETE in v1_images")
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
+
         if user and user != 'expired':
             app.logger.debug("got user")
 
@@ -550,7 +554,8 @@ def v1_users_id(userId):
 
     if request.method == "GET":
         app.logger.debug("Reached GET in v1_users_userId")
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
 
         qUser = get_user_by_id(userId)
         visibility = getVisibility(user, qUser)
@@ -628,14 +633,21 @@ def v1_recipes():
             query = query.where(u'authorId', u'==', q_user['uid'])
 
         if user == None or user == 'expired':
+            app.logger.debug("user expired or none")
             query = query.where(u'visibility', u'==', u'public')
         elif q_user == None:
+            app.logger.debug("q_user is none")
             query = query.where(u'visibility', u'==', u'public')
         elif q_user['uid'] != user['uid']:
+            app.logger.debug("q_user and user not matched")
             query = query.where(u'visibility', u'==', u'public')
-        elif q_user['uid'] != user['uid']:
+        elif q_user['uid'] == user['uid']:
+            app.logger.debug("must be users recipes")
             pass
         else:
+            app.logger.debug("something else?")
+            app.logger.debug(q_user)
+            app.logger.debug(user)
             query = query.where(u'visibility', u'==', u'public')
 
         if recipeType:
@@ -676,7 +688,8 @@ def v1_recipes():
     elif request.method == "POST":
         app.logger.debug("Reached POST in v1_recipes")
         app.logger.debug(request.headers)
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
 
         if user and user != 'expired':
             try:
@@ -751,7 +764,8 @@ def v1_recipes():
 @apiView.route('/v1/recipes/search', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def v1_recipes_search():
     if request.method == "GET":
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
 
         q = request.args.get("q", default=None)
 
@@ -1014,7 +1028,8 @@ def v1_recipes_id_reviews(recipeId):
     elif request.method == "POST":
         app.logger.debug("Reached POST in v1_recipes_id_reviews")
         app.logger.debug(request.headers)
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
 
         if user and user != 'expired':
             try:
@@ -1126,7 +1141,8 @@ def v1_recipes_id_bookmarks(recipeId):
     elif request.method == "POST":
         app.logger.debug("Reached POST in v1_recipes_id_bookmarks")
         app.logger.debug(request.headers)
-        user = validate_firebase_token_return_user(request)
+        userObj = validate_firebase_token_return_user(request)
+        user = userObj.to_dict()
 
         if user and user != 'expired':
             try:
