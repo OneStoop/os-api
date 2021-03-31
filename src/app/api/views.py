@@ -78,7 +78,8 @@ def add_user(email, uid, name):
     data['email'] = email
     data['name'] = name
     data['created_date'] = created
-    newUser = DB.collection(u'Users').document(uid).set(data)
+    newUser = DB.collection(u'Users').document(uid)
+    newUser.set(data)
     return newUser
 
 
@@ -86,6 +87,10 @@ def format_user_response(user, visibility):
     #convert user to dict if needed
     #if type(user) == pyArango.document.Document:
         #user = user.getStore()
+    try:
+        user = user.to_dict()
+    except:
+        pass
 
     # make sure the user object has all the keys we need
     if "displayName" not in user.keys():
@@ -484,17 +489,18 @@ def v1_users():
         q_email = request.args.get("email", default=None)
 
         if displayName and q_id:
-            user = get_user_by_id(q_id)
+            userObj = get_user_by_id(q_id)
+            user = userObj.to_dict()
             if user and 'displayName' in user.to_dict().keys():
-                responseData = {'status': 'ok', 'user': {"displayName": user['displayName']}}
+                responseData = {'status': 'ok', 'user': {"displayName": user['displayName'], 'uid': user['uid']}}
                 app.logger.debug(responseData)
                 return make_response(jsonify(responseData), 200)
             elif user:
-                responseData = {'status': 'ok', 'user': {"displayName": ''}}
+                responseData = {'status': 'ok', 'user': {"displayName": '', 'uid': user['uid']}}
                 app.logger.debug(responseData)
                 return make_response(jsonify(responseData), 200)
             else:
-                responseData = {'status': 'not found', 'user': {"displayName": ''}}
+                responseData = {'status': 'not found', 'user': {"displayName": '', 'uid': user['uid']}}
                 app.logger.debug(responseData)
                 return make_response(jsonify(responseData), 404)
 
@@ -537,6 +543,8 @@ def v1_users():
             decoded_token = False
 
         if decoded_token and decoded_token != 'expired':
+            app.logger.debug("decoded_token")
+            app.logger.debug(decoded_token)
             email = decoded_token['email']
             uid = decoded_token['uid']
             name = request.args.get('name') or None
@@ -544,6 +552,7 @@ def v1_users():
             existingUser = get_user(email)
 
             if existingUser:
+                app.logger.debug("existingUser")
                 return make_response(jsonify({'status': 'ok'}), 200)
             else:
                 user = add_user(email,
