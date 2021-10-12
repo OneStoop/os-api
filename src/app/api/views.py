@@ -1415,3 +1415,177 @@ def v1_recipeTypes():
         types = {"types": ["other"]}
         return make_response(jsonify(types), 200)
 
+
+
+##############
+############## auto ###############
+@apiView.route('/auto/v1/vehicles', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def auto_v1_vehicles():
+
+    userObj = validate_firebase_token_return_user(request)
+    if type(userObj) != str and userObj != None:
+        user = userObj.to_dict()
+    else:
+        user = userObj
+
+    if user and user != 'expired':
+        pass
+    elif user == 'expired':
+        return make_response(jsonify({'status': 'expired'}), 401)
+    else:
+        return make_response(jsonify({'status': 'failed'}), 401)
+
+    if request.method == "GET":
+        app.logger.debug("Reached GET in /auto/v1/vehicles")
+        app.logger.debug(request.url)
+        app.logger.debug(request.headers)
+
+        vehicles = DB.collection(u'Vehicles')
+        query = vehicles.where(u'uid', u'==', user['uid'])
+
+        docs = query.stream()
+        myVehicles = {"vehicles": []}
+        for doc in docs:
+            app.logger.debug(doc.id)
+            d = doc.to_dict()
+            d['vid'] = doc.id
+            myVehicles['vehicles'].append(d)
+
+
+        return make_response(jsonify(myVehicles), 200)
+
+
+
+    elif request.method == "POST":
+        """
+        {
+        "vehicles": {
+            [id]: {
+            "uid": str,
+            "createdDate": int,
+            "status": str,
+            "type": str,
+            "mfg": str,
+            "model": str,
+            "year": int,
+            "nickname": str,
+            "tanks": [
+                {
+                "name": str,
+                "fuelType": str,
+                "capacity": float
+                }
+            ]
+            "units": str,
+            "licensePlate": str,
+            "licensePlateExp": int,
+            "lastInspection": int,
+            "chassisNumber": str,
+            "vin": str,
+            "notes": str,
+            "updated": int
+            }
+          }
+        }
+        """
+        try:
+            data = request.get_json()
+            app.logger.debug(data)
+        except Exception:
+            return make_response(jsonify({'status': 'fail'}), 400)
+
+        data['uid'] = user['uid']
+        data['created'] = int(time.time())
+        data['updated'] = int(time.time())
+
+        try:
+            doc = DB.collection(u'Vehicles').document()
+            doc.set(data)
+        except Exception:
+            return make_response(jsonify({'status': 'fail'}), 400)
+
+        vehicles = DB.collection(u'Vehicles')
+        query = vehicles.where(u'uid', u'==', user['uid'])
+
+        docs = query.stream()
+        myVehicles = {"vehicles": []}
+        for doc in docs:
+            app.logger.debug(doc.id)
+            d = doc.to_dict()
+            d['uid'] = doc.id
+            myVehicles['vehicles'].append(d)
+
+        return make_response(jsonify(myVehicles), 200)
+
+
+@apiView.route('/auto/v1/vehicles/<vehiclesId>', methods=['GET', 'POST', 'PUT', 'DELETE'])
+def auto_v1_vehicles_vehiclesId(vehiclesId):
+
+    if request.method == "GET":
+        pass
+    elif request.method == "POST":
+        app.logger.debug("Reached POST in auto_v1_vehicles_vehiclesId")
+        app.logger.debug(request.headers)
+        userObj = validate_firebase_token_return_user(request)
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
+
+        if '/' in vehiclesId:
+            r = vehiclesId.split('/')
+            vehiclesId = r[1]
+
+        try:
+            docRef = DB.collection(u'Vehicles').document(vehiclesId)
+            doc = docRef.get()
+            vehicle = doc.to_dict()
+        except Exception:
+            return make_response(jsonify({'status': 'not found'}), 404)
+
+        if user['uid'] != vehicle['uid']:
+            return make_response(jsonify({'status': 'Unauthorized'}), 401)
+
+        try:
+            data = request.get_json()
+            app.logger.debug(data)
+        except Exception:
+            return make_response(jsonify({'status': 'fail'}), 400)
+
+        goodKeys = [
+            "uid",
+            "createdDate",
+            "active",
+            "type",
+            "mfg",
+            "model",
+            "year",
+            "nickname",
+            "tanks",
+            "units",
+            "licensePlate",
+            "licensePlateExp",
+            "lastInspection",
+            "chassisNumber",
+            "vin",
+            "notes",
+            "updated"
+                    ]
+
+        for key, value in data.items():
+            if key not in goodKeys:
+                continue
+
+            if key == "images":
+                pass
+            else:
+                vehicle[key] = value
+
+        vehicle['updated'] = int(time.time())
+
+        try:
+            DB.collection(u'Vehicles').document(vehiclesId).set(vehicle)
+        except Exception:
+            return make_response(jsonify({'status': 'database error'}), 500)
+
+        return make_response(jsonify({'status': 'ok'}), 200)
