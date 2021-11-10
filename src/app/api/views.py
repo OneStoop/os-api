@@ -1441,7 +1441,7 @@ def auto_v1_vehicles():
         app.logger.debug(request.headers)
 
         vehicles = DB.collection(u'Vehicles')
-        query = vehicles.where(u'uid', u'==', user['uid'])
+        query = vehicles.where(u'ownerId', u'==', user['uid'])
 
         docs = query.stream()
         myVehicles = {"vehicles": []}
@@ -1461,7 +1461,7 @@ def auto_v1_vehicles():
         {
         "vehicles": {
             [id]: {
-            "uid": str,
+            "ownerId": str,
             "createdDate": int,
             "status": str,
             "type": str,
@@ -1494,9 +1494,10 @@ def auto_v1_vehicles():
         except Exception:
             return make_response(jsonify({'status': 'fail'}), 400)
 
-        data['uid'] = user['uid']
+        data['ownerId'] = user['uid']
         data['created'] = int(time.time())
         data['updated'] = int(time.time())
+        data['active'] = True
 
         try:
             doc = DB.collection(u'Vehicles').document()
@@ -1512,7 +1513,7 @@ def auto_v1_vehicles():
         for doc in docs:
             app.logger.debug(doc.id)
             d = doc.to_dict()
-            d['uid'] = doc.id
+            d['vid'] = doc.id
             myVehicles['vehicles'].append(d)
 
         return make_response(jsonify(myVehicles), 200)
@@ -1543,7 +1544,7 @@ def auto_v1_vehicles_vehiclesId(vehiclesId):
         except Exception:
             return make_response(jsonify({'status': 'not found'}), 404)
 
-        if user['uid'] != vehicle['uid']:
+        if user['uid'] != vehicle['ownerId']:
             return make_response(jsonify({'status': 'Unauthorized'}), 401)
 
         try:
@@ -1587,5 +1588,36 @@ def auto_v1_vehicles_vehiclesId(vehiclesId):
             DB.collection(u'Vehicles').document(vehiclesId).set(vehicle)
         except Exception:
             return make_response(jsonify({'status': 'database error'}), 500)
+
+        return make_response(jsonify({'status': 'ok'}), 200)
+    elif request.method == "DELETE":
+        app.logger.debug("Reached DELETE in auto_v1_vehicles_vehiclesId")
+        app.logger.debug(request.headers)
+        userObj = validate_firebase_token_return_user(request)
+        if type(userObj) != str and userObj != None:
+            user = userObj.to_dict()
+        else:
+            user = userObj
+
+        if '/' in vehiclesId:
+            r = vehiclesId.split('/')
+            vehiclesId = r[1]
+
+        try:
+            docRef = DB.collection(u'Vehicles').document(vehiclesId)
+            doc = docRef.get()
+            vehicle = doc.to_dict()
+        except Exception:
+            return make_response(jsonify({'status': 'not found'}), 404)
+
+        if user['uid'] != vehicle['ownerId']:
+            return make_response(jsonify({'status': 'Unauthorized'}), 401)
+
+        # delete recipe
+        try:
+            DB.collection(u'Vehicles').document(vehiclesId).delete()
+        except Exception:
+            app.logger.debug("failed vehicle delete")
+            return make_response(jsonify({'status': 'Error'}), 500)
 
         return make_response(jsonify({'status': 'ok'}), 200)
