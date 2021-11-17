@@ -1484,6 +1484,7 @@ def auto_v1_vehicles():
             "vin": str,
             "notes": str,
             "updated": int
+            "lastOdometer": int
             }
           }
         }
@@ -1498,6 +1499,7 @@ def auto_v1_vehicles():
         data['created'] = int(time.time())
         data['updated'] = int(time.time())
         data['active'] = True
+        data['lastOdometer'] = 0
 
         try:
             doc = DB.collection(u'Vehicles').document()
@@ -1570,7 +1572,8 @@ def auto_v1_vehicles_vehiclesId(vehiclesId):
             "chassisNumber",
             "vin",
             "notes",
-            "updated"
+            "updated",
+            "lastOdometer"
                     ]
 
         for key, value in data.items():
